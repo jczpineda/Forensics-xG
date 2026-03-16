@@ -25,17 +25,15 @@ Over 35 stackable visual modules categorized by phase of play:
 
 ## 🛠️ Installation & Usage
 
-**1. Clone the repository:**
+**1. Clone the Repository:**
 ```bash
 git clone [https://github.com/jczpineda/Forensics-xG.git](https://github.com/jczpineda/Forensics-xG.git)
 cd Forensics-xG
 
-**2. Install dependencies:**
-```bash
+**2. Install Dependencies:**
 pip install -r requirements.txt
 
-**3. Run the application locally:**
-```bash
+**3. Run the Application Locally:**
 streamlit run forensics_app.py
 
 ## 🕵️‍♂️ About the Author
