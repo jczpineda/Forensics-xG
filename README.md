@@ -31,14 +31,14 @@ git clone [https://github.com/jczpineda/Forensics-xG.git](https://github.com/jcz
 cd Forensics-xG
 
 **2. Install dependencies:**
-Bash
+```bash
 pip install -r requirements.txt
 
 **3. Run the application locally:**
-Bash
+```bash
 streamlit run forensics_app.py
 
-🕵️‍♂️ About the Author
+## 🕵️‍♂️ About the Author
 Created and maintained by Carlos Pineda.
 Currently honing advanced analytical methodologies in the Sports Analytics program at Escuela Universitaria Real Madrid.
 
