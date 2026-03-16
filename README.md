@@ -29,15 +29,3 @@ Over 35 stackable visual modules categorized by phase of play:
 ```bash
 git clone [https://github.com/jczpineda/Forensics-xG.git](https://github.com/jczpineda/Forensics-xG.git)
 cd Forensics-xG
-
-**2. Install Dependencies:**
-pip install -r requirements.txt
-
-**3. Run the Application Locally:**
-streamlit run forensics_app.py
-
-## 🕵️‍♂️ About the Author
-Created and maintained by Carlos Pineda.
-Currently honing advanced analytical methodologies in the Sports Analytics program at Escuela Universitaria Real Madrid.
-
-For more deep-dive tactical breakdowns and visual evidence, check out The Box-to-Box Investigator on YouTube.
