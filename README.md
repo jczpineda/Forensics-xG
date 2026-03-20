@@ -36,6 +36,8 @@ pip install -r requirements.txt
 **3. Run the Application Locally:**
 streamlit run forensics_app.py
 
+**LINK: https://forensics-xg-crime-scene.streamlit.app/**
+
 ## 🕵️‍♂️ About the Author
 Created and maintained by Carlos Pineda.
 Currently honing advanced analytical methodologies in the Sports Analytics program at Escuela Universitaria Real Madrid.
