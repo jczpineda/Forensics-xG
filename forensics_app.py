@@ -278,23 +278,68 @@ CASE_DATABASE = {
 
 @st.cache_data(show_spinner=False)
 def _load_all_manager_data(manager_key):
-    """Load all matches for a manager and return Manchester United player events."""
+    """Load all matches for a manager. Returns (utd_df, sp_goals, sp_assists)."""
     json_files = CASE_DATABASE[manager_key]["json_files"]
-    all_dfs = []
+    utd_parts = []
+    full_dfs = {}  # label -> full match df
     for label, path in json_files.items():
         df, err = load_match_data(path)
         if df is not None and not df.empty:
             utd = df[df['Team'] == 'Manchester United'].copy()
+            if utd.empty:
+                continue
             utd['Match'] = label
-            # Store full match df for set-piece assist detection
-            utd.attrs['_match_df'] = df
-            all_dfs.append((label, utd, df))
-    if all_dfs:
-        combined = pd.concat([t[1] for t in all_dfs], ignore_index=True)
-        # Stash per-match full DataFrames for set piece detection
-        combined.attrs['_match_dfs'] = {t[0]: t[2] for t in all_dfs}
-        return combined
-    return pd.DataFrame()
+            utd_parts.append(utd)
+            full_dfs[label] = df
+    if not utd_parts:
+        return pd.DataFrame(), {}, {}
+    combined = pd.concat(utd_parts, ignore_index=True)
+
+    # Compute set-piece goals & assists inside the cached function
+    sp_goals = {}
+    sp_assists = {}
+    utd_team = 'Manchester United'
+    for match_label, full_df in full_dfs.items():
+        goals = full_df[
+            (full_df['Type'] == 16) & (full_df['Team'] == utd_team) &
+            (full_df['Outcome'] != 'Own Goal') & (full_df['Period'] < 5)
+        ]
+        sp_events = full_df[
+            (full_df['Team'] == utd_team) & (full_df['Type'] == 1) &
+            (full_df['isCorner'] | full_df['isFreeKick'])
+        ]
+        for _, g in goals.iterrows():
+            prior_sp = sp_events[
+                (sp_events['Index'] < g['Index']) &
+                (sp_events['Index'] >= g['Index'] - 15)
+            ]
+            if prior_sp.empty:
+                continue
+            sp_evt = prior_sp.iloc[-1]
+            between = full_df[
+                (full_df['Index'] > sp_evt['Index']) &
+                (full_df['Index'] < g['Index'])
+            ]
+            cleared = between[
+                (between['Team'] != utd_team) &
+                (between['Type'].isin([10, 11, 52]))
+            ]
+            if not cleared.empty:
+                continue
+            scorer = g['Player']
+            sp_goals[scorer] = sp_goals.get(scorer, 0) + 1
+            pre_goal = full_df[
+                (full_df['Index'] < g['Index']) &
+                (full_df['Index'] >= g['Index'] - 5) &
+                (full_df['Team'] == utd_team) &
+                (full_df['Type'] == 1) &
+                (full_df['Outcome'] == 'Successful')
+            ]
+            if not pre_goal.empty:
+                assister = pre_goal.iloc[-1]['Player']
+                if assister != scorer:
+                    sp_assists[assister] = sp_assists.get(assister, 0) + 1
+    return combined, sp_goals, sp_assists
 
 
 # --- 5. HELPER: Zonal Grid Renderer ---
@@ -1329,63 +1374,11 @@ for mgr_idx, manager in enumerate(managers):
             mgr_short = manager.split()[-1].title()  # Amorim / Fletcher / Carrick
             st.header(f"👥 Manchester United Players")
             with st.spinner(f"Loading all {mgr_short}-era match data..."):
-                utd_df = _load_all_manager_data(manager)
+                utd_df, sp_goals_map, sp_assists_map = _load_all_manager_data(manager)
 
             if not utd_df.empty:
                 n_matches = utd_df['Match'].nunique()
                 players = sorted([p for p in utd_df['Player'].unique() if p != 'Unknown'])
-                match_dfs = utd_df.attrs.get('_match_dfs', {})
-
-                # --- Helper: count set-piece goals & assists per player ---
-                def _sp_stats(utd_all, match_dfs_dict):
-                    sp_goals = {}    # player -> count of goals from set pieces
-                    sp_assists = {}  # player -> count of assists from set pieces
-                    for match_label, full_df in match_dfs_dict.items():
-                        utd_team = 'Manchester United'
-                        goals = full_df[
-                            (full_df['Type'] == 16) & (full_df['Team'] == utd_team) &
-                            (full_df['Outcome'] != 'Own Goal') & (full_df['Period'] < 5)
-                        ]
-                        sp_events = full_df[
-                            (full_df['Team'] == utd_team) & (full_df['Type'] == 1) &
-                            (full_df['isCorner'] | full_df['isFreeKick'])
-                        ]
-                        for _, g in goals.iterrows():
-                            prior_sp = sp_events[
-                                (sp_events['Index'] < g['Index']) &
-                                (sp_events['Index'] >= g['Index'] - 15)
-                            ]
-                            if prior_sp.empty:
-                                continue
-                            sp_evt = prior_sp.iloc[-1]
-                            between = full_df[
-                                (full_df['Index'] > sp_evt['Index']) &
-                                (full_df['Index'] < g['Index'])
-                            ]
-                            cleared = between[
-                                (between['Team'] != utd_team) &
-                                (between['Type'].isin([10, 11, 52]))
-                            ]
-                            if not cleared.empty:
-                                continue
-                            # Goal from set piece
-                            scorer = g['Player']
-                            sp_goals[scorer] = sp_goals.get(scorer, 0) + 1
-                            # Assist: last successful pass before the goal by a different player
-                            pre_goal = full_df[
-                                (full_df['Index'] < g['Index']) &
-                                (full_df['Index'] >= g['Index'] - 5) &
-                                (full_df['Team'] == utd_team) &
-                                (full_df['Type'] == 1) &
-                                (full_df['Outcome'] == 'Successful')
-                            ]
-                            if not pre_goal.empty:
-                                assister = pre_goal.iloc[-1]['Player']
-                                if assister != scorer:
-                                    sp_assists[assister] = sp_assists.get(assister, 0) + 1
-                    return sp_goals, sp_assists
-
-                sp_goals_map, sp_assists_map = _sp_stats(utd_df, match_dfs)
 
                 # --- Player Stats Summary ---
                 st.subheader(f"📊 Average Player Statistics ({n_matches} Matches)")
