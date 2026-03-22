@@ -322,7 +322,7 @@ def _load_all_manager_data(manager_key):
             ]
             cleared = between[
                 (between['Team'] != utd_team) &
-                (between['Type'].isin([10, 11, 52]))
+                (between['Type'].isin([8, 10, 11, 12, 51, 52]))
             ]
             if not cleared.empty:
                 continue
@@ -397,14 +397,14 @@ def _check_sp_goal(sp_df, team, match_df):
         if not prior.empty:
             sp_idx = prior.iloc[-1]['Index']
             # Check for possession-breaking events between the set piece and goal:
-            # goalkeeper save/claim (Type 10/11) or goal kick (Type 52) by the
-            # opposing team indicates the set piece was cleared.
+            # interception (8), save (10), keeper claim (11), clearance (12),
+            # keeper punch (51), or goal kick (52) by the opposing team.
             between = match_df[
                 (match_df['Index'] > sp_idx) & (match_df['Index'] < g['Index'])
             ]
             cleared = between[
                 (between['Team'] != team) &
-                (between['Type'].isin([10, 11, 52]))
+                (between['Type'].isin([8, 10, 11, 12, 51, 52]))
             ]
             if cleared.empty:
                 goal_indices.add(sp_idx)
