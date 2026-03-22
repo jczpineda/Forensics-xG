@@ -339,17 +339,10 @@ def _load_all_manager_data(manager_key):
                     continue
             scorer = g['Player']
             sp_goals[scorer] = sp_goals.get(scorer, 0) + 1
-            pre_goal = full_df[
-                (full_df['Index'] < g['Index']) &
-                (full_df['Index'] >= g['Index'] - 5) &
-                (full_df['Team'] == utd_team) &
-                (full_df['Type'] == 1) &
-                (full_df['Outcome'] == 'Successful')
-            ]
-            if not pre_goal.empty:
-                assister = pre_goal.iloc[-1]['Player']
-                if assister != scorer:
-                    sp_assists[assister] = sp_assists.get(assister, 0) + 1
+            # The set piece taker gets the assist (they delivered the ball)
+            sp_taker = sp_evt['Player']
+            if sp_taker != scorer:
+                sp_assists[sp_taker] = sp_assists.get(sp_taker, 0) + 1
     return combined, sp_goals, sp_assists
 
 
