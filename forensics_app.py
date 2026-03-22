@@ -11,8 +11,26 @@ from scipy.spatial import ConvexHull
 from io import BytesIO
 from urllib.parse import quote, urlparse
 import matplotlib.pyplot as plt
+import os
 
-# --- 1. SETUP ---
+# --- 1. CONFIGURATION (write only once) ---
+_CONFIG_PATH = os.path.join(".streamlit", "config.toml")
+if not os.path.exists(_CONFIG_PATH):
+    os.makedirs(".streamlit", exist_ok=True)
+    with open(_CONFIG_PATH, "w") as f:
+        f.write("""
+[theme]
+base="dark"
+primaryColor="#ff4b4b"
+backgroundColor="#0e1117"
+secondaryBackgroundColor="#262730"
+textColor="#fafafa"
+font="sans serif"
+[server]
+headless = true
+""")
+
+# --- 2. SETUP ---
 st.set_page_config(page_title="Forensics xG", layout="wide", page_icon="🧬")
 
 # --- 3. DATA LOADER ---
@@ -311,7 +329,19 @@ def _check_sp_goal(sp_df, team, match_df):
     for _, g in goals.iterrows():
         prior = sp_df[(sp_df['Index'] < g['Index']) & (sp_df['Index'] >= g['Index'] - 15)]
         if not prior.empty:
-            goal_indices.add(prior.iloc[-1]['Index'])
+            sp_idx = prior.iloc[-1]['Index']
+            # Check for possession-breaking events between the set piece and goal:
+            # goalkeeper save/claim (Type 10/11) or goal kick (Type 52) by the
+            # opposing team indicates the set piece was cleared.
+            between = match_df[
+                (match_df['Index'] > sp_idx) & (match_df['Index'] < g['Index'])
+            ]
+            cleared = between[
+                (between['Team'] != team) &
+                (between['Type'].isin([10, 11, 52]))
+            ]
+            if cleared.empty:
+                goal_indices.add(sp_idx)
 
     for _, p in sp_df.iterrows():
         if p['Index'] in goal_indices:
