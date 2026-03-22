@@ -173,6 +173,7 @@ def load_match_data(path_or_url):
                         "isCorner": 6 in qids,
                         "isFreeKick": 5 in qids,
                         "isFkShot": 26 in qids,
+                        "isThrowIn": 107 in qids,
                         "isFastBreak": bool(qids & {23, 24}),
                         "isBlocked": 82 in qids,
                         "isHome": (team_name == home_name)
@@ -306,7 +307,7 @@ def _load_all_manager_data(manager_key):
         ]
         sp_events = full_df[
             (full_df['Team'] == utd_team) & (full_df['Type'] == 1) &
-            (full_df['isCorner'] | full_df['isFreeKick'])
+            (full_df['isCorner'] | full_df['isFreeKick'] | full_df['isThrowIn'])
         ]
         for _, g in goals.iterrows():
             prior_sp = sp_events[
@@ -320,12 +321,22 @@ def _load_all_manager_data(manager_key):
                 (full_df['Index'] > sp_evt['Index']) &
                 (full_df['Index'] < g['Index'])
             ]
-            cleared = between[
-                (between['Team'] != utd_team) &
-                (between['Type'].isin([8, 10, 11, 12, 51, 52]))
-            ]
-            if not cleared.empty:
-                continue
+            is_throwin = bool(sp_evt.get('isThrowIn', False))
+            if is_throwin:
+                # Throw-in: only count if no team passes between delivery and goal
+                team_passes = between[
+                    (between['Team'] == utd_team) & (between['Type'] == 1)
+                ]
+                if not team_passes.empty:
+                    continue
+            else:
+                # Corner/FK: check for possession-breaking clearing events
+                cleared = between[
+                    (between['Team'] != utd_team) &
+                    (between['Type'].isin([8, 10, 11, 12, 51, 52]))
+                ]
+                if not cleared.empty:
+                    continue
             scorer = g['Player']
             sp_goals[scorer] = sp_goals.get(scorer, 0) + 1
             pre_goal = full_df[
@@ -395,19 +406,27 @@ def _check_sp_goal(sp_df, team, match_df):
     for _, g in goals.iterrows():
         prior = sp_df[(sp_df['Index'] < g['Index']) & (sp_df['Index'] >= g['Index'] - 15)]
         if not prior.empty:
-            sp_idx = prior.iloc[-1]['Index']
-            # Check for possession-breaking events between the set piece and goal:
-            # interception (8), save (10), keeper claim (11), clearance (12),
-            # keeper punch (51), or goal kick (52) by the opposing team.
+            sp_evt = prior.iloc[-1]
+            sp_idx = sp_evt['Index']
             between = match_df[
                 (match_df['Index'] > sp_idx) & (match_df['Index'] < g['Index'])
             ]
-            cleared = between[
-                (between['Team'] != team) &
-                (between['Type'].isin([8, 10, 11, 12, 51, 52]))
-            ]
-            if cleared.empty:
-                goal_indices.add(sp_idx)
+            is_throwin = bool(sp_evt.get('isThrowIn', False))
+            if is_throwin:
+                # Throw-in: only count if no team passes between delivery and goal
+                team_passes = between[
+                    (between['Team'] == team) & (between['Type'] == 1)
+                ]
+                if team_passes.empty:
+                    goal_indices.add(sp_idx)
+            else:
+                # Corner/FK: check for possession-breaking clearing events
+                cleared = between[
+                    (between['Team'] != team) &
+                    (between['Type'].isin([8, 10, 11, 12, 51, 52]))
+                ]
+                if cleared.empty:
+                    goal_indices.add(sp_idx)
 
     for _, p in sp_df.iterrows():
         if p['Index'] in goal_indices:
