@@ -8,7 +8,7 @@ import plotly.express as px
 import matplotlib.patches as mpatches
 import matplotlib.lines as mlines
 from scipy.spatial import ConvexHull
-from io import BytesIO
+from io import BytesIO, StringIO
 from urllib.parse import quote, urlparse
 import matplotlib.pyplot as plt
 import os
@@ -65,7 +65,9 @@ def load_stats_data(path_or_url):
             return None, f"HTTP {r.status_code}"
 
         if url.lower().endswith('.csv'):
-            df = pd.read_csv(BytesIO(r.content))
+            raw = r.content.decode('utf-8-sig', errors='ignore')
+            sep = ';' if ';' in raw.split('\n')[0] else ','
+            df = pd.read_csv(StringIO(raw), sep=sep)
         else:
             df = pd.read_excel(BytesIO(r.content), engine='openpyxl')
 
@@ -257,7 +259,9 @@ CASE_DATABASE = {
     },
     "DARREN FLETCHER": {
         "json_files": {"vs Burnley (2)": "fletcher.json/Burnley 2.JSON"},
-        "stats_files": {}
+        "stats_files": {
+            "📊 UnderStat (Amorim & Fletcher)": "fletcher.csv/Amorim and Fletcher UnderStat.csv",
+        }
     },
     "MICHAEL CARRICK": {
         "json_files": {
@@ -493,6 +497,7 @@ for mgr_idx, manager in enumerate(managers):
                                 st.plotly_chart(fig, use_container_width=True)
 
                             st.divider()
+                            display_df.index = range(1, len(display_df) + 1)
                             st.dataframe(display_df, use_container_width=True)
                     elif err:
                         st.error(f"Failed to load data: {err}")
