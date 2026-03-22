@@ -277,18 +277,23 @@ CASE_DATABASE = {
 
 
 @st.cache_data(show_spinner=False)
-def _load_all_carrick_data():
-    """Load all Carrick matches and return Manchester United player events."""
-    json_files = CASE_DATABASE["MICHAEL CARRICK"]["json_files"]
-    all_events = []
+def _load_all_manager_data(manager_key):
+    """Load all matches for a manager and return Manchester United player events."""
+    json_files = CASE_DATABASE[manager_key]["json_files"]
+    all_dfs = []
     for label, path in json_files.items():
         df, err = load_match_data(path)
         if df is not None and not df.empty:
             utd = df[df['Team'] == 'Manchester United'].copy()
             utd['Match'] = label
-            all_events.append(utd)
-    if all_events:
-        return pd.concat(all_events, ignore_index=True)
+            # Store full match df for set-piece assist detection
+            utd.attrs['_match_df'] = df
+            all_dfs.append((label, utd, df))
+    if all_dfs:
+        combined = pd.concat([t[1] for t in all_dfs], ignore_index=True)
+        # Stash per-match full DataFrames for set piece detection
+        combined.attrs['_match_dfs'] = {t[0]: t[2] for t in all_dfs}
+        return combined
     return pd.DataFrame()
 
 
@@ -391,10 +396,7 @@ tabs = st.tabs(managers)
 
 for mgr_idx, manager in enumerate(managers):
     with tabs[mgr_idx]:
-        if manager == "MICHAEL CARRICK":
-            sub_t1, sub_t2, sub_t3 = st.tabs(["📊 STATISTICAL REPORTS", "⚽ MATCH TELEMETRY", "👥 MANCHESTER UNITED PLAYERS"])
-        else:
-            sub_t1, sub_t2 = st.tabs(["📊 STATISTICAL REPORTS", "⚽ MATCH TELEMETRY"])
+        sub_t1, sub_t2, sub_t3 = st.tabs(["📊 STATISTICAL REPORTS", "⚽ MATCH TELEMETRY", "👥 MANCHESTER UNITED PLAYERS"])
 
         # === TAB A: STATS ===
         with sub_t1:
@@ -1322,156 +1324,211 @@ for mgr_idx, manager in enumerate(managers):
                     else:
                         st.error(f"Error: {err}")
 
-        # === TAB C: MANCHESTER UNITED PLAYERS (Carrick only) ===
-        if manager == "MICHAEL CARRICK":
-            with sub_t3:
-                st.header("👥 Manchester United Players")
-                with st.spinner("Loading all Carrick-era match data..."):
-                    utd_df = _load_all_carrick_data()
+        # === TAB C: MANCHESTER UNITED PLAYERS ===
+        with sub_t3:
+            mgr_short = manager.split()[-1].title()  # Amorim / Fletcher / Carrick
+            st.header(f"👥 Manchester United Players")
+            with st.spinner(f"Loading all {mgr_short}-era match data..."):
+                utd_df = _load_all_manager_data(manager)
 
-                if not utd_df.empty:
-                    n_matches = utd_df['Match'].nunique()
-                    players = sorted([p for p in utd_df['Player'].unique() if p != 'Unknown'])
+            if not utd_df.empty:
+                n_matches = utd_df['Match'].nunique()
+                players = sorted([p for p in utd_df['Player'].unique() if p != 'Unknown'])
+                match_dfs = utd_df.attrs.get('_match_dfs', {})
 
-                    # --- Player Stats Summary ---
-                    st.subheader(f"📊 Average Player Statistics ({n_matches} Matches)")
-                    stats_rows = []
-                    for player in players:
-                        pdf = utd_df[utd_df['Player'] == player]
-                        mp = pdf['Match'].nunique()
-                        passes_att = len(pdf[pdf['Type'] == 1])
-                        passes_comp = len(pdf[(pdf['Type'] == 1) & (pdf['Outcome'] == 'Successful')])
-                        pass_pct = round(passes_comp / passes_att * 100, 1) if passes_att > 0 else 0
-                        shots = len(pdf[pdf['Type'].isin([13, 14, 15, 16])])
-                        goals = len(pdf[(pdf['Type'] == 16) & (pdf['Outcome'] != 'Own Goal')])
-                        tackles = len(pdf[pdf['Type'] == 7])
-                        interceptions = len(pdf[pdf['Type'] == 8])
-                        clearances = len(pdf[pdf['Type'] == 12])
-                        fouls = len(pdf[pdf['Type'] == 4])
-                        xt = pdf['xT_Added'].sum()
-                        stats_rows.append({
-                            'Player': player,
-                            'Matches': mp,
-                            'Passes/Match': round(passes_att / mp, 1),
-                            'Comp/Match': round(passes_comp / mp, 1),
-                            'Pass %': pass_pct,
-                            'Shots/Match': round(shots / mp, 2),
-                            'Goals': goals,
-                            'Tackles/Match': round(tackles / mp, 2),
-                            'Int/Match': round(interceptions / mp, 2),
-                            'Clear/Match': round(clearances / mp, 2),
-                            'Fouls/Match': round(fouls / mp, 2),
-                            'xT/Match': round(xt / mp, 3),
-                        })
-                    stats_summary = pd.DataFrame(stats_rows).sort_values('xT/Match', ascending=False)
-                    st.dataframe(stats_summary, use_container_width=True, hide_index=True)
+                # --- Helper: count set-piece goals & assists per player ---
+                def _sp_stats(utd_all, match_dfs_dict):
+                    sp_goals = {}    # player -> count of goals from set pieces
+                    sp_assists = {}  # player -> count of assists from set pieces
+                    for match_label, full_df in match_dfs_dict.items():
+                        utd_team = 'Manchester United'
+                        goals = full_df[
+                            (full_df['Type'] == 16) & (full_df['Team'] == utd_team) &
+                            (full_df['Outcome'] != 'Own Goal') & (full_df['Period'] < 5)
+                        ]
+                        sp_events = full_df[
+                            (full_df['Team'] == utd_team) & (full_df['Type'] == 1) &
+                            (full_df['isCorner'] | full_df['isFreeKick'])
+                        ]
+                        for _, g in goals.iterrows():
+                            prior_sp = sp_events[
+                                (sp_events['Index'] < g['Index']) &
+                                (sp_events['Index'] >= g['Index'] - 15)
+                            ]
+                            if prior_sp.empty:
+                                continue
+                            sp_evt = prior_sp.iloc[-1]
+                            between = full_df[
+                                (full_df['Index'] > sp_evt['Index']) &
+                                (full_df['Index'] < g['Index'])
+                            ]
+                            cleared = between[
+                                (between['Team'] != utd_team) &
+                                (between['Type'].isin([10, 11, 52]))
+                            ]
+                            if not cleared.empty:
+                                continue
+                            # Goal from set piece
+                            scorer = g['Player']
+                            sp_goals[scorer] = sp_goals.get(scorer, 0) + 1
+                            # Assist: last successful pass before the goal by a different player
+                            pre_goal = full_df[
+                                (full_df['Index'] < g['Index']) &
+                                (full_df['Index'] >= g['Index'] - 5) &
+                                (full_df['Team'] == utd_team) &
+                                (full_df['Type'] == 1) &
+                                (full_df['Outcome'] == 'Successful')
+                            ]
+                            if not pre_goal.empty:
+                                assister = pre_goal.iloc[-1]['Player']
+                                if assister != scorer:
+                                    sp_assists[assister] = sp_assists.get(assister, 0) + 1
+                    return sp_goals, sp_assists
+
+                sp_goals_map, sp_assists_map = _sp_stats(utd_df, match_dfs)
+
+                # --- Player Stats Summary ---
+                st.subheader(f"📊 Average Player Statistics ({n_matches} Matches)")
+                stats_rows = []
+                for player in players:
+                    pdf = utd_df[utd_df['Player'] == player]
+                    mp = pdf['Match'].nunique()
+                    passes_att = len(pdf[pdf['Type'] == 1])
+                    passes_comp = len(pdf[(pdf['Type'] == 1) & (pdf['Outcome'] == 'Successful')])
+                    pass_pct = round(passes_comp / passes_att * 100, 1) if passes_att > 0 else 0
+                    shots = len(pdf[pdf['Type'].isin([13, 14, 15, 16])])
+                    goals = len(pdf[(pdf['Type'] == 16) & (pdf['Outcome'] != 'Own Goal')])
+                    tackles = len(pdf[pdf['Type'] == 7])
+                    interceptions = len(pdf[pdf['Type'] == 8])
+                    clearances = len(pdf[pdf['Type'] == 12])
+                    fouls = len(pdf[pdf['Type'] == 4])
+                    xt = pdf['xT_Added'].sum()
+                    stats_rows.append({
+                        'Player': player,
+                        'Matches': mp,
+                        'Passes/Match': round(passes_att / mp, 1),
+                        'Comp/Match': round(passes_comp / mp, 1),
+                        'Pass %': pass_pct,
+                        'Shots/Match': round(shots / mp, 2),
+                        'Goals': goals,
+                        'SP Goals': sp_goals_map.get(player, 0),
+                        'SP Assists': sp_assists_map.get(player, 0),
+                        'Tackles/Match': round(tackles / mp, 2),
+                        'Int/Match': round(interceptions / mp, 2),
+                        'Clear/Match': round(clearances / mp, 2),
+                        'Fouls/Match': round(fouls / mp, 2),
+                        'xT/Match': round(xt / mp, 3),
+                    })
+                stats_summary = pd.DataFrame(stats_rows).sort_values('xT/Match', ascending=False)
+                st.dataframe(stats_summary, use_container_width=True, hide_index=True)
+                st.divider()
+
+                # --- Player Selector ---
+                sel_p = st.selectbox("Select Player for Visualizations", players, key=f"player_sel_{manager}")
+                p_df = utd_df[utd_df['Player'] == sel_p]
+
+                if not p_df.empty:
+                    col_hm, col_ps = st.columns(2)
+
+                    # --- Average Heatmap ---
+                    with col_hm:
+                        st.subheader("🔥 Average Heatmap")
+                        fig_hm, ax_hm = plt.subplots(figsize=(10, 7))
+                        fig_hm.set_facecolor('#0e1117')
+                        ax_hm.set_facecolor('#0e1117')
+                        pitch_hm = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='white')
+                        pitch_hm.draw(ax=ax_hm)
+                        if len(p_df) >= 2:
+                            pitch_hm.kdeplot(p_df['x'].values, p_df['y'].values, ax=ax_hm, cmap='hot', fill=True, levels=100, alpha=0.6)
+                        else:
+                            pitch_hm.scatter(p_df['x'].values, p_df['y'].values, s=100, color='#ff4b4b', ax=ax_hm)
+                        ax_hm.set_title(f'{sel_p} — All {mgr_short} Matches ({p_df["Match"].nunique()} games)', color='white', fontsize=12)
+                        st.pyplot(fig_hm)
+                        plt.close(fig_hm)
+
+                    # --- Average Pass Sonar ---
+                    with col_ps:
+                        st.subheader("📡 Average Pass Sonar")
+                        p_passes = p_df[(p_df['Type'] == 1) & (p_df['Outcome'] == 'Successful')]
+                        if not p_passes.empty:
+                            dx = p_passes['endX'] - p_passes['x']
+                            dy = p_passes['endY'] - p_passes['y']
+                            angles = np.arctan2(dy, dx)
+                            fig_ps = plt.figure(figsize=(6, 6))
+                            fig_ps.set_facecolor('#0e1117')
+                            ax_ps = fig_ps.add_subplot(111, polar=True)
+                            ax_ps.set_facecolor('#0e1117')
+                            ax_ps.hist(angles, bins=24, color='#00ffff', alpha=0.7, edgecolor='white')
+                            ax_ps.set_theta_zero_location('E')
+                            ax_ps.set_yticks([])
+                            ax_ps.grid(color='#262730')
+                            ax_ps.tick_params(axis='x', colors='white')
+                            ax_ps.set_title(f'{sel_p} — Pass Direction', color='white', fontsize=12, pad=20)
+                            st.pyplot(fig_ps)
+                            plt.close(fig_ps)
+                        else:
+                            st.info("No successful passes recorded for this player.")
+
                     st.divider()
 
-                    # --- Player Selector ---
-                    sel_p = st.selectbox("Select Player for Visualizations", players, key="carrick_player_sel")
-                    p_df = utd_df[utd_df['Player'] == sel_p]
+                    # --- Passing Network (average positions + connections) ---
+                    st.subheader("🔗 Average Passing Network")
+                    net_df = utd_df.copy()
+                    avg_pos = net_df.groupby('Player')[['x', 'y']].mean()
+                    pass_counts = net_df.groupby('Player').size()
+                    net_df['NextPlayer'] = net_df['Player'].shift(-1)
+                    net_df['NextTeam'] = net_df['Team'].shift(-1)
+                    connections = net_df[
+                        (net_df['Type'] == 1) & (net_df['Outcome'] == 'Successful') &
+                        (net_df['NextTeam'] == 'Manchester United')
+                    ]
+                    min_edge_count = 3 if n_matches > 1 else 1
+                    fig_net, ax_net = plt.subplots(figsize=(10, 7))
+                    fig_net.set_facecolor('#0e1117')
+                    ax_net.set_facecolor('#0e1117')
+                    pitch_net = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='white')
+                    pitch_net.draw(ax=ax_net)
+                    if not connections.empty:
+                        edges = connections.groupby(['Player', 'NextPlayer']).size().reset_index(name='count')
+                        edges = edges[edges['count'] > min_edge_count]
+                        max_edge = edges['count'].max() if not edges.empty else 1
+                        for _, row in edges.iterrows():
+                            p1, p2 = row['Player'], row['NextPlayer']
+                            if p1 in avg_pos.index and p2 in avg_pos.index:
+                                width = (row['count'] / max_edge) * 6
+                                alpha = min(0.9, row['count'] / max_edge + 0.2)
+                                pitch_net.lines(avg_pos.loc[p1].x, avg_pos.loc[p1].y,
+                                                avg_pos.loc[p2].x, avg_pos.loc[p2].y,
+                                                lw=width, color='#ff4b4b', alpha=alpha, ax=ax_net, zorder=1)
+                        for player in avg_pos.index:
+                            if player in pass_counts.index and player != 'Unknown':
+                                s = min(pass_counts[player] * 2, 600)
+                                pitch_net.scatter(avg_pos.loc[player].x, avg_pos.loc[player].y,
+                                                  s=s, color='#0e1117', edgecolors='white', linewidth=2, ax=ax_net, zorder=2)
+                                pitch_net.annotate(player.split(" ")[-1], xy=(avg_pos.loc[player].x, avg_pos.loc[player].y),
+                                                   c='white', va='center', ha='center', size=8, ax=ax_net, zorder=3)
+                    ax_net.set_title(f'Average Passing Network — All {mgr_short} Matches', color='white', fontsize=12)
+                    st.pyplot(fig_net)
+                    plt.close(fig_net)
 
-                    if not p_df.empty:
-                        col_hm, col_ps = st.columns(2)
+                    st.divider()
 
-                        # --- Average Heatmap ---
-                        with col_hm:
-                            st.subheader("🔥 Average Heatmap")
-                            fig_hm, ax_hm = plt.subplots(figsize=(10, 7))
-                            fig_hm.set_facecolor('#0e1117')
-                            ax_hm.set_facecolor('#0e1117')
-                            pitch_hm = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='white')
-                            pitch_hm.draw(ax=ax_hm)
-                            if len(p_df) >= 2:
-                                pitch_hm.kdeplot(p_df['x'].values, p_df['y'].values, ax=ax_hm, cmap='hot', fill=True, levels=100, alpha=0.6)
-                            else:
-                                pitch_hm.scatter(p_df['x'].values, p_df['y'].values, s=100, color='#ff4b4b', ax=ax_hm)
-                            ax_hm.set_title(f'{sel_p} — All Carrick Matches ({p_df["Match"].nunique()} games)', color='white', fontsize=12)
-                            st.pyplot(fig_hm)
-                            plt.close(fig_hm)
+                    # --- Average xT per Player ---
+                    st.subheader("⚡ Average Expected Threat (xT) per Match")
+                    player_xt = utd_df[utd_df['Type'].isin([1, 3])].groupby('Player').agg(
+                        xT_Total=('xT_Added', 'sum'),
+                        Matches=('Match', 'nunique')
+                    ).reset_index()
+                    player_xt = player_xt[player_xt['Player'] != 'Unknown']
+                    player_xt['xT per Match'] = (player_xt['xT_Total'] / player_xt['Matches']).round(4)
+                    player_xt = player_xt.sort_values('xT per Match', ascending=True)
 
-                        # --- Average Pass Sonar ---
-                        with col_ps:
-                            st.subheader("📡 Average Pass Sonar")
-                            p_passes = p_df[(p_df['Type'] == 1) & (p_df['Outcome'] == 'Successful')]
-                            if not p_passes.empty:
-                                dx = p_passes['endX'] - p_passes['x']
-                                dy = p_passes['endY'] - p_passes['y']
-                                angles = np.arctan2(dy, dx)
-                                fig_ps = plt.figure(figsize=(6, 6))
-                                fig_ps.set_facecolor('#0e1117')
-                                ax_ps = fig_ps.add_subplot(111, polar=True)
-                                ax_ps.set_facecolor('#0e1117')
-                                ax_ps.hist(angles, bins=24, color='#00ffff', alpha=0.7, edgecolor='white')
-                                ax_ps.set_theta_zero_location('E')
-                                ax_ps.set_yticks([])
-                                ax_ps.grid(color='#262730')
-                                ax_ps.tick_params(axis='x', colors='white')
-                                ax_ps.set_title(f'{sel_p} — Pass Direction', color='white', fontsize=12, pad=20)
-                                st.pyplot(fig_ps)
-                                plt.close(fig_ps)
-                            else:
-                                st.info("No successful passes recorded for this player.")
-
-                        st.divider()
-
-                        # --- Passing Network (average positions + connections) ---
-                        st.subheader("🔗 Average Passing Network")
-                        net_df = utd_df.copy()
-                        avg_pos = net_df.groupby('Player')[['x', 'y']].mean()
-                        pass_counts = net_df.groupby('Player').size()
-                        net_df['NextPlayer'] = net_df['Player'].shift(-1)
-                        net_df['NextTeam'] = net_df['Team'].shift(-1)
-                        connections = net_df[
-                            (net_df['Type'] == 1) & (net_df['Outcome'] == 'Successful') &
-                            (net_df['NextTeam'] == 'Manchester United')
-                        ]
-                        fig_net, ax_net = plt.subplots(figsize=(10, 7))
-                        fig_net.set_facecolor('#0e1117')
-                        ax_net.set_facecolor('#0e1117')
-                        pitch_net = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='white')
-                        pitch_net.draw(ax=ax_net)
-                        if not connections.empty:
-                            edges = connections.groupby(['Player', 'NextPlayer']).size().reset_index(name='count')
-                            edges = edges[edges['count'] > 3]
-                            max_edge = edges['count'].max() if not edges.empty else 1
-                            for _, row in edges.iterrows():
-                                p1, p2 = row['Player'], row['NextPlayer']
-                                if p1 in avg_pos.index and p2 in avg_pos.index:
-                                    width = (row['count'] / max_edge) * 6
-                                    alpha = min(0.9, row['count'] / max_edge + 0.2)
-                                    pitch_net.lines(avg_pos.loc[p1].x, avg_pos.loc[p1].y,
-                                                    avg_pos.loc[p2].x, avg_pos.loc[p2].y,
-                                                    lw=width, color='#ff4b4b', alpha=alpha, ax=ax_net, zorder=1)
-                            for player in avg_pos.index:
-                                if player in pass_counts.index and player != 'Unknown':
-                                    s = min(pass_counts[player] * 2, 600)
-                                    pitch_net.scatter(avg_pos.loc[player].x, avg_pos.loc[player].y,
-                                                      s=s, color='#0e1117', edgecolors='white', linewidth=2, ax=ax_net, zorder=2)
-                                    pitch_net.annotate(player.split(" ")[-1], xy=(avg_pos.loc[player].x, avg_pos.loc[player].y),
-                                                       c='white', va='center', ha='center', size=8, ax=ax_net, zorder=3)
-                        ax_net.set_title('Average Passing Network — All Carrick Matches', color='white', fontsize=12)
-                        st.pyplot(fig_net)
-                        plt.close(fig_net)
-
-                        st.divider()
-
-                        # --- Average xT per Player ---
-                        st.subheader("⚡ Average Expected Threat (xT) per Match")
-                        player_xt = utd_df[utd_df['Type'].isin([1, 3])].groupby('Player').agg(
-                            xT_Total=('xT_Added', 'sum'),
-                            Matches=('Match', 'nunique')
-                        ).reset_index()
-                        player_xt = player_xt[player_xt['Player'] != 'Unknown']
-                        player_xt['xT per Match'] = (player_xt['xT_Total'] / player_xt['Matches']).round(4)
-                        player_xt = player_xt.sort_values('xT per Match', ascending=True)
-
-                        fig_xt_bar = px.bar(
-                            player_xt, x='xT per Match', y='Player', orientation='h',
-                            title='Average xT Created per Match', template='plotly_dark',
-                            color='xT per Match', color_continuous_scale=['#ff4b4b', '#00ff85']
-                        )
-                        fig_xt_bar.update_layout(paper_bgcolor='#0e1117', plot_bgcolor='#0e1117', height=600)
-                        st.plotly_chart(fig_xt_bar, use_container_width=True)
-                else:
-                    st.error("Failed to load Carrick match data.")
+                    fig_xt_bar = px.bar(
+                        player_xt, x='xT per Match', y='Player', orientation='h',
+                        title='Average xT Created per Match', template='plotly_dark',
+                        color='xT per Match', color_continuous_scale=['#ff4b4b', '#00ff85']
+                    )
+                    fig_xt_bar.update_layout(paper_bgcolor='#0e1117', plot_bgcolor='#0e1117', height=600)
+                    st.plotly_chart(fig_xt_bar, use_container_width=True)
+            else:
+                st.error(f"Failed to load {mgr_short} match data.")
