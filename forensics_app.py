@@ -574,6 +574,7 @@ for mgr_idx, manager in enumerate(managers):
                         # --- Prepare filtered DataFrames ---
                         plot_df = match_df[match_df['Team'] == sel_team].copy()
                         plot_df = plot_df[(plot_df['Minute'] >= min_range[0]) & (plot_df['Minute'] <= min_range[1])]
+                        plot_df = plot_df[plot_df['Player'] != 'Unknown']
 
                         if sel_player != "All Players":
                             plot_df = plot_df[plot_df['Player'] == sel_player]
@@ -581,6 +582,7 @@ for mgr_idx, manager in enumerate(managers):
                         opp_team = [t for t in teams if t != sel_team][0]
                         opp_stats = match_df[match_df['Team'] == opp_team].copy()
                         opp_stats = opp_stats[(opp_stats['Minute'] >= min_range[0]) & (opp_stats['Minute'] <= min_range[1])]
+                        opp_stats = opp_stats[opp_stats['Player'] != 'Unknown']
 
                         # Flip opponent coordinates so they attack left (x=0)
                         opp_stats['x'] = 100 - opp_stats['x']
