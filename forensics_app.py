@@ -433,6 +433,26 @@ def _check_sp_goal(sp_df, team, match_df):
     return pd.DataFrame(goal_sp), pd.DataFrame(reg_sp)
 
 
+def _fix_gk_positions(def_avg, source_df):
+    """Replace goalkeeper avg positions with their GK-event averages.
+
+    Keepers are identified by having save events (Type 10). Their defensive
+    position is recalculated from GK-specific events (saves, claims, pick-ups,
+    punches, goal kicks) which better represent their actual pitch position.
+    """
+    gk_types = [10, 11, 50, 51, 52]
+    keepers = source_df[source_df['Type'] == 10]['Player'].unique()
+    for gk in keepers:
+        gk_events = source_df[(source_df['Player'] == gk) & (source_df['Type'].isin(gk_types))]
+        if not gk_events.empty:
+            if gk in def_avg.index:
+                def_avg.loc[gk, 'x'] = gk_events['x'].mean()
+                def_avg.loc[gk, 'y'] = gk_events['y'].mean()
+            else:
+                def_avg.loc[gk] = {'x': gk_events['x'].mean(), 'y': gk_events['y'].mean()}
+    return def_avg
+
+
 # --- 6. INTERFACE ---
 st.markdown("""
     <style>
@@ -1082,6 +1102,7 @@ for mgr_idx, manager in enumerate(managers):
                                 def_events = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
                                 if not def_events.empty:
                                     def_avg = def_events.groupby('Player')[['x', 'y']].mean()
+                                    def_avg = _fix_gk_positions(def_avg, plot_df)
                                     pitch.scatter(def_avg['x'].values, def_avg['y'].values, s=150, c='#ff4b4b', edgecolors='white', marker='s', ax=ax, zorder=3, label='Avg Defensive Position')
                                     for player, row in def_avg.iterrows():
                                         pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y + 3), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
@@ -1103,6 +1124,7 @@ for mgr_idx, manager in enumerate(managers):
 
                                 if not opp_def_events.empty:
                                     def_avg = opp_def_events.groupby('Player')[['x', 'y']].mean()
+                                    def_avg = _fix_gk_positions(def_avg, opp_viz)
                                     pitch.scatter(def_avg['x'].values, def_avg['y'].values, s=150, c='#ff4b4b', edgecolors='white', marker='s', ax=ax, zorder=3, label=f'{opp_team} (Def)')
                                     for player, row in def_avg.iterrows():
                                         pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y + 3), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
@@ -1114,6 +1136,7 @@ for mgr_idx, manager in enumerate(managers):
 
                                 if not def_events.empty:
                                     def_avg = def_events.groupby('Player')[['x', 'y']].mean()
+                                    def_avg = _fix_gk_positions(def_avg, plot_df)
                                     pitch.scatter(def_avg['x'].values, def_avg['y'].values, s=150, c='#ff4b4b', edgecolors='white', marker='s', ax=ax, zorder=3, label=f'{sel_team} (Def)')
                                     for player, row in def_avg.iterrows():
                                         pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y + 3), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
@@ -1408,7 +1431,10 @@ for mgr_idx, manager in enumerate(managers):
                     pass_pct = round(passes_comp / passes_att * 100, 1) if passes_att > 0 else 0
                     shots = len(pdf[pdf['Type'].isin([13, 14, 15, 16])])
                     goals = len(pdf[(pdf['Type'] == 16) & (pdf['Outcome'] != 'Own Goal')])
-                    tackles = len(pdf[pdf['Type'] == 7])
+                    tackles_all = pdf[pdf['Type'] == 7]
+                    tackles_won = len(tackles_all[tackles_all['Outcome'] == 'Successful'])
+                    tackles_lost = len(tackles_all[tackles_all['Outcome'] == 'Unsuccessful'])
+                    tackles = len(tackles_all)
                     interceptions = len(pdf[pdf['Type'] == 8])
                     clearances = len(pdf[pdf['Type'] == 12])
                     fouls = len(pdf[pdf['Type'] == 4])
@@ -1424,6 +1450,8 @@ for mgr_idx, manager in enumerate(managers):
                         'SP Goals': sp_goals_map.get(player, 0),
                         'SP Assists': sp_assists_map.get(player, 0),
                         'Tackles/Match': round(tackles / mp, 2),
+                        'TklW/Match': round(tackles_won / mp, 2),
+                        'TklL/Match': round(tackles_lost / mp, 2),
                         'Int/Match': round(interceptions / mp, 2),
                         'Clear/Match': round(clearances / mp, 2),
                         'Fouls/Match': round(fouls / mp, 2),
