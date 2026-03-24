@@ -434,14 +434,19 @@ def _check_sp_goal(sp_df, team, match_df):
 
 
 def _fix_gk_positions(def_avg, source_df):
-    """Replace goalkeeper avg positions with their GK-event averages.
+    """Replace goalkeeper avg positions with their GK-event averages and
+    fill in missing outfield players using their all-event averages.
 
     Keepers are identified by having save events (Type 10). Their defensive
     position is recalculated from GK-specific events (saves, claims, pick-ups,
     punches, goal kicks) which better represent their actual pitch position.
+
+    Outfield players active in the time range but without defensive events
+    are added at their average position across all events so that the full
+    squad is visible.
     """
     gk_types = [10, 11, 50, 51, 52]
-    keepers = source_df[source_df['Type'] == 10]['Player'].unique()
+    keepers = set(source_df[source_df['Type'] == 10]['Player'].unique())
     for gk in keepers:
         gk_events = source_df[(source_df['Player'] == gk) & (source_df['Type'].isin(gk_types))]
         if not gk_events.empty:
@@ -450,6 +455,13 @@ def _fix_gk_positions(def_avg, source_df):
                 def_avg.loc[gk, 'y'] = gk_events['y'].mean()
             else:
                 def_avg.loc[gk] = {'x': gk_events['x'].mean(), 'y': gk_events['y'].mean()}
+    # Fill missing outfield players from all-event averages
+    all_players = source_df[source_df['Player'] != 'Unknown']['Player'].unique()
+    for player in all_players:
+        if player not in def_avg.index and player not in keepers:
+            p_events = source_df[source_df['Player'] == player]
+            if not p_events.empty:
+                def_avg.loc[player] = {'x': p_events['x'].mean(), 'y': p_events['y'].mean()}
     return def_avg
 
 
@@ -1100,9 +1112,9 @@ for mgr_idx, manager in enumerate(managers):
 
                             if "Average Defensive Positions" in pitch_modules:
                                 def_events = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
-                                if not def_events.empty:
-                                    def_avg = def_events.groupby('Player')[['x', 'y']].mean()
-                                    def_avg = _fix_gk_positions(def_avg, plot_df)
+                                def_avg = def_events.groupby('Player')[['x', 'y']].mean() if not def_events.empty else pd.DataFrame(columns=['x', 'y'])
+                                def_avg = _fix_gk_positions(def_avg, plot_df)
+                                if not def_avg.empty:
                                     pitch.scatter(def_avg['x'].values, def_avg['y'].values, s=150, c='#ff4b4b', edgecolors='white', marker='s', ax=ax, zorder=3, label='Avg Defensive Position')
                                     for player, row in def_avg.iterrows():
                                         pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y + 3), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
@@ -1124,7 +1136,11 @@ for mgr_idx, manager in enumerate(managers):
 
                                 if not opp_def_events.empty:
                                     def_avg = opp_def_events.groupby('Player')[['x', 'y']].mean()
+                                else:
+                                    def_avg = pd.DataFrame(columns=['x', 'y'])
+                                if not opp_viz.empty:
                                     def_avg = _fix_gk_positions(def_avg, opp_viz)
+                                if not def_avg.empty:
                                     pitch.scatter(def_avg['x'].values, def_avg['y'].values, s=150, c='#ff4b4b', edgecolors='white', marker='s', ax=ax, zorder=3, label=f'{opp_team} (Def)')
                                     for player, row in def_avg.iterrows():
                                         pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y + 3), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
@@ -1136,7 +1152,10 @@ for mgr_idx, manager in enumerate(managers):
 
                                 if not def_events.empty:
                                     def_avg = def_events.groupby('Player')[['x', 'y']].mean()
-                                    def_avg = _fix_gk_positions(def_avg, plot_df)
+                                else:
+                                    def_avg = pd.DataFrame(columns=['x', 'y'])
+                                def_avg = _fix_gk_positions(def_avg, plot_df)
+                                if not def_avg.empty:
                                     pitch.scatter(def_avg['x'].values, def_avg['y'].values, s=150, c='#ff4b4b', edgecolors='white', marker='s', ax=ax, zorder=3, label=f'{sel_team} (Def)')
                                     for player, row in def_avg.iterrows():
                                         pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y + 3), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
