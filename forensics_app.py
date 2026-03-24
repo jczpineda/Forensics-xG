@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import json
 import requests
+import math
 from mplsoccer import Pitch
 import plotly.express as px
 import matplotlib.patches as mpatches
@@ -112,6 +113,38 @@ def _qualifier_ids(qualifiers):
     return ids
 
 
+def _calc_xg(x, y, is_header=False):
+    """Estimate xG for a shot using a distance-and-angle logistic model.
+
+    Coordinates are Opta 0-100 scale. Pitch dimensions: 105m x 68m.
+    Goal at x=100, center y=50, posts at y≈44.6 and y≈55.4.
+    """
+    x_m = x * 1.05
+    y_m = y * 0.68
+    goal_x, goal_y = 105.0, 34.0
+    post1_y, post2_y = 30.34, 37.66  # 34 ± 3.66
+
+    dist = math.sqrt((goal_x - x_m) ** 2 + (goal_y - y_m) ** 2)
+    if dist < 0.5:
+        return 0.95
+
+    # Angle subtended by the goal
+    dx = max(goal_x - x_m, 0.01)
+    v1 = (dx, post1_y - y_m)
+    v2 = (dx, post2_y - y_m)
+    dot = v1[0] * v2[0] + v1[1] * v2[1]
+    m1 = math.sqrt(v1[0] ** 2 + v1[1] ** 2)
+    m2 = math.sqrt(v2[0] ** 2 + v2[1] ** 2)
+    cos_a = max(-1.0, min(1.0, dot / (m1 * m2)))
+    angle = math.acos(cos_a)
+
+    if is_header:
+        coeff = -2.0 - 0.1 * dist + 1.0 * angle
+    else:
+        coeff = -1.20 - 0.09 * dist + 1.50 * angle
+    return 1.0 / (1.0 + math.exp(-coeff))
+
+
 @st.cache_data(show_spinner=False)
 def load_match_data(path_or_url):
     url, err = _build_url(path_or_url)
@@ -199,6 +232,15 @@ def load_match_data(path_or_url):
                 xt_diff,
                 0
             )
+
+            # Compute xG for shots (Types 13=Miss, 14=Post, 15=SavedShot, 16=Goal)
+            is_shot = df_events['Type'].isin([13, 14, 15, 16])
+            df_events['xG'] = 0.0
+            shot_mask = is_shot & (df_events['Outcome'] != 'Own Goal')
+            if shot_mask.any():
+                df_events.loc[shot_mask, 'xG'] = df_events.loc[shot_mask].apply(
+                    lambda r: _calc_xg(r['x'], r['y']), axis=1
+                )
 
         return df_events, None
     except Exception as e:
@@ -618,15 +660,24 @@ for mgr_idx, manager in enumerate(managers):
                         ]
                         avg_rec_height = round(recoveries['x'].mean(), 1) if not recoveries.empty else 0
 
+                        # Possession %
+                        opp_total_passes = len(opp_stats[opp_stats['Type'] == 1])
+                        possession = round(total_passes / (total_passes + opp_total_passes) * 100, 1) if (total_passes + opp_total_passes) > 0 else 0
+
+                        # Expected Goals
+                        team_xg = round(plot_df.loc[plot_df['Type'].isin([13, 14, 15, 16]) & (plot_df['Outcome'] != 'Own Goal'), 'xG'].sum(), 2)
+
                         st.divider()
-                        m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
+                        m1, m2, m3, m4, m5, m6, m7, m8, m9 = st.columns(9)
                         m1.metric("⚽ Passing", f"{succ_passes}/{total_passes}", f"{pass_acc}%")
                         m2.metric("🎯 Shooting", f"{goals} Goals", f"{total_shots} Shots")
-                        m3.metric("🛡️ Def. Actions", f"{total_def}", f"{tackles} Tackles")
-                        m4.metric("⚠️ Discipline", f"{fouls} Fouls", "Committed")
-                        m5.metric("⚖️ Field Tilt", f"{field_tilt}%", "Final 3rd Share")
-                        m6.metric("🛑 PPDA", f"{ppda}", "Passes per Def. Action")
-                        m7.metric("📏 Def. Line", f"{avg_rec_height}m", "Avg Recovery Height")
+                        m3.metric("📊 Possession", f"{possession}%", "Pass-Based")
+                        m4.metric("📈 xG", f"{team_xg}", f"{goals} Actual Goals")
+                        m5.metric("🛡️ Def. Actions", f"{total_def}", f"{tackles} Tackles")
+                        m6.metric("⚠️ Discipline", f"{fouls} Fouls", "Committed")
+                        m7.metric("⚖️ Field Tilt", f"{field_tilt}%", "Final 3rd Share")
+                        m8.metric("🛑 PPDA", f"{ppda}", "Passes per Def. Action")
+                        m9.metric("📏 Def. Line", f"{avg_rec_height}m", "Avg Recovery Height")
                         st.divider()
 
                         # --- Module Selection ---
