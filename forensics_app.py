@@ -1795,5 +1795,64 @@ for mgr_idx, manager in enumerate(managers):
                         ax_dh.set_title(f'Defensive Actions — {n_matches_t} Matches', color='white', fontsize=12)
                         st.pyplot(fig_dh)
                         plt.close(fig_dh)
+
+                    st.divider()
+
+                    # --- Average Attacking Zones (5 Lanes) ---
+                    col_az, col_xt = st.columns(2)
+                    with col_az:
+                        st.subheader("⚔️ Average Attacking Zones (5 Lanes)")
+                        f3_acts_t = utd_df_t[(utd_df_t['x'] > 66.6) & (utd_df_t['Type'] == 1) & (utd_df_t['Outcome'] == 'Successful')]
+                        total_f3_t = len(f3_acts_t)
+                        fig_az, ax_az = plt.subplots(figsize=(10, 7))
+                        fig_az.set_facecolor('#0e1117')
+                        ax_az.set_facecolor('#0e1117')
+                        pitch_az = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='white')
+                        pitch_az.draw(ax=ax_az)
+                        if total_f3_t > 0:
+                            lane_defs = [
+                                ("Right Flank", 0, 20),
+                                ("Right Half", 20, 37),
+                                ("Center", 37, 63),
+                                ("Left Half", 63, 80),
+                                ("Left Flank", 80, 100),
+                            ]
+                            for label, y_lo, y_hi in lane_defs:
+                                count = len(f3_acts_t[(f3_acts_t['y'] > y_lo) & (f3_acts_t['y'] <= y_hi)]) if y_lo > 0 else len(f3_acts_t[f3_acts_t['y'] <= y_hi])
+                                pct = (count / total_f3_t) * 100
+                                height = y_hi - y_lo
+                                rect = mpatches.Rectangle((66.6, y_lo), 33.4, height, alpha=min(0.9, max(0.2, pct / 40)), color='#ff4b4b', ec='white')
+                                ax_az.add_patch(rect)
+                                ax_az.text(66.6 + 16.7, y_lo + (height / 2), f"{label}\n{pct:.1f}%", color='white', ha='center', va='center', fontweight='bold', fontsize=9)
+                        ax_az.set_title(f'Final 3rd Attacking Lanes — {n_matches_t} Matches', color='white', fontsize=12)
+                        st.pyplot(fig_az)
+                        plt.close(fig_az)
+
+                    # --- Average xT Grid ---
+                    with col_xt:
+                        st.subheader("⚡ Average xT Grid")
+                        xt_acts_t = utd_df_t[(utd_df_t['Type'].isin([1, 3])) & (utd_df_t['Outcome'] == 'Successful') & (utd_df_t['xT_Added'] > 0)]
+                        fig_xtg, ax_xtg = plt.subplots(figsize=(10, 7))
+                        fig_xtg.set_facecolor('#0e1117')
+                        ax_xtg.set_facecolor('#0e1117')
+                        pitch_xtg = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='white')
+                        pitch_xtg.draw(ax=ax_xtg)
+                        if not xt_acts_t.empty:
+                            bin_stat = pitch_xtg.bin_statistic(xt_acts_t['x'].values, xt_acts_t['y'].values, values=xt_acts_t['xT_Added'].values, statistic='sum', bins=(12, 8))
+                            pitch_xtg.heatmap(bin_stat, ax=ax_xtg, cmap='magma', alpha=0.7, edgecolors='#262730', lw=1, zorder=0)
+                            stat = bin_stat['statistic']
+                            cx = bin_stat['cx']
+                            cy = bin_stat['cy']
+                            for row_i in range(stat.shape[0]):
+                                for col_j in range(stat.shape[1]):
+                                    val = stat[row_i, col_j]
+                                    if val > 0.001:
+                                        ax_xtg.text(cx[row_i, col_j], cy[row_i, col_j], f'{val:.3f}', color='white',
+                                                    ha='center', va='center', fontsize=9, fontweight='bold', zorder=1)
+                        else:
+                            pitch_xtg.annotate("No positive xT actions recorded", xy=(50, 50), c='white', ha='center', va='center', size=15, ax=ax_xtg)
+                        ax_xtg.set_title(f'Expected Threat Grid — {n_matches_t} Matches', color='white', fontsize=12)
+                        st.pyplot(fig_xtg)
+                        plt.close(fig_xtg)
             else:
                 st.error(f"Failed to load {mgr_short_t} match data.")
