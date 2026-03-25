@@ -339,7 +339,7 @@ def _load_all_manager_data(manager_key):
             utd_parts.append(utd)
             full_dfs[label] = df
     if not utd_parts:
-        return pd.DataFrame(), {}, {}
+        return pd.DataFrame(), {}, {}, []
     combined = pd.concat(utd_parts, ignore_index=True)
 
     # Compute set-piece goals & assists inside the cached function
@@ -389,7 +389,34 @@ def _load_all_manager_data(manager_key):
             sp_taker = sp_evt['Player']
             if sp_taker != scorer:
                 sp_assists[sp_taker] = sp_assists.get(sp_taker, 0) + 1
-    return combined, sp_goals, sp_assists
+    # Compute per-match team stats for the Average Team Stats tab
+    team_match_stats = []
+    utd_team_name = 'Manchester United'
+    for match_label, full_df in full_dfs.items():
+        utd_events = full_df[(full_df['Team'] == utd_team_name) & (full_df['Player'] != 'Unknown')]
+        opp_events = full_df[(full_df['Team'] != utd_team_name) & (full_df['Player'] != 'Unknown')]
+        utd_passes = len(utd_events[utd_events['Type'] == 1])
+        opp_passes = len(opp_events[opp_events['Type'] == 1])
+        possession = round(utd_passes / (utd_passes + opp_passes) * 100, 1) if (utd_passes + opp_passes) > 0 else 0
+        utd_shots = utd_events[utd_events['Type'].isin([13, 14, 15, 16]) & (utd_events['Outcome'] != 'Own Goal')]
+        match_xg = round(utd_shots['xG'].sum(), 2)
+        utd_f3 = len(utd_events[(utd_events['Type'] == 1) & (utd_events['x'] > 66.6)])
+        opp_f3 = len(opp_events[(opp_events['Type'] == 1) & (opp_events['x'] > 66.6)])
+        total_f3 = utd_f3 + opp_f3
+        field_tilt = round(utd_f3 / total_f3 * 100, 1) if total_f3 > 0 else 0
+        utd_def = len(utd_events[utd_events['Type'].isin([4, 7, 8])])
+        ppda = round(opp_passes / utd_def, 1) if utd_def > 0 else 0
+        recoveries = utd_events[
+            ((utd_events['Type'] == 7) & (utd_events['Outcome'] == 'Successful')) |
+            (utd_events['Type'].isin([8, 12]))
+        ]
+        avg_def_line = round(recoveries['x'].mean(), 1) if not recoveries.empty else 0
+        team_match_stats.append({
+            'Match': match_label, 'Possession': possession, 'xG': match_xg,
+            'Field Tilt': field_tilt, 'PPDA': ppda, 'Def Line': avg_def_line
+        })
+
+    return combined, sp_goals, sp_assists, team_match_stats
 
 
 # --- 5. HELPER: Zonal Grid Renderer ---
@@ -531,7 +558,7 @@ tabs = st.tabs(managers)
 
 for mgr_idx, manager in enumerate(managers):
     with tabs[mgr_idx]:
-        sub_t1, sub_t2, sub_t3 = st.tabs(["📊 STATISTICAL REPORTS", "⚽ MATCH TELEMETRY", "👥 MANCHESTER UNITED PLAYERS"])
+        sub_t1, sub_t2, sub_t3, sub_t4 = st.tabs(["📊 STATISTICAL REPORTS", "⚽ MATCH TELEMETRY", "👥 AVERAGE PLAYER STATS", "📈 AVERAGE TEAM STATS"])
 
         # === TAB A: STATS ===
         with sub_t1:
@@ -1482,12 +1509,12 @@ for mgr_idx, manager in enumerate(managers):
                     else:
                         st.error(f"Error: {err}")
 
-        # === TAB C: MANCHESTER UNITED PLAYERS ===
+        # === TAB C: AVERAGE PLAYER STATS ===
         with sub_t3:
             mgr_short = manager.split()[-1].title()  # Amorim / Fletcher / Carrick
-            st.header(f"👥 Manchester United Players")
+            st.header(f"👥 Average Player Stats")
             with st.spinner(f"Loading all {mgr_short}-era match data..."):
-                utd_df, sp_goals_map, sp_assists_map = _load_all_manager_data(manager)
+                utd_df, sp_goals_map, sp_assists_map, team_match_stats = _load_all_manager_data(manager)
 
             if not utd_df.empty:
                 n_matches = utd_df['Match'].nunique()
@@ -1643,3 +1670,130 @@ for mgr_idx, manager in enumerate(managers):
                     st.plotly_chart(fig_xt_bar, use_container_width=True)
             else:
                 st.error(f"Failed to load {mgr_short} match data.")
+
+        # === TAB D: AVERAGE TEAM STATS ===
+        with sub_t4:
+            mgr_short_t = manager.split()[-1].title()
+            st.header(f"📈 Average Team Stats — {mgr_short_t} Era")
+            with st.spinner(f"Loading all {mgr_short_t}-era match data..."):
+                utd_df_t, _, _, team_stats_t = _load_all_manager_data(manager)
+
+            if team_stats_t:
+                ts_df = pd.DataFrame(team_stats_t)
+                n_matches_t = len(ts_df)
+
+                # --- Summary Metrics ---
+                avg_poss = round(ts_df['Possession'].mean(), 1)
+                avg_xg = round(ts_df['xG'].mean(), 2)
+                avg_tilt = round(ts_df['Field Tilt'].mean(), 1)
+                avg_ppda = round(ts_df['PPDA'].mean(), 1)
+                avg_def = round(ts_df['Def Line'].mean(), 1)
+
+                st.subheader(f"📊 Averages Across {n_matches_t} Matches")
+                mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+                mc1.metric("📊 Possession", f"{avg_poss}%")
+                mc2.metric("📈 xG", f"{avg_xg}")
+                mc3.metric("⚖️ Field Tilt", f"{avg_tilt}%")
+                mc4.metric("🛑 PPDA", f"{avg_ppda}")
+                mc5.metric("📏 Def. Line", f"{avg_def}m")
+                st.divider()
+
+                # --- Per-Match Table ---
+                st.subheader("📋 Per-Match Breakdown")
+                display_ts = ts_df.copy()
+                display_ts.index = range(1, len(display_ts) + 1)
+                st.dataframe(display_ts, use_container_width=True)
+                st.divider()
+
+                # --- Bar Charts Row ---
+                bc1, bc2 = st.columns(2)
+                with bc1:
+                    fig_poss = px.bar(
+                        ts_df, x='Match', y='Possession', title='Possession % per Match',
+                        template='plotly_dark', color='Possession',
+                        color_continuous_scale=['#ff4b4b', '#00ff85']
+                    )
+                    fig_poss.add_hline(y=avg_poss, line_dash='dash', line_color='#ffd700',
+                                       annotation_text=f'Avg: {avg_poss}%', annotation_font_color='#ffd700')
+                    fig_poss.update_layout(paper_bgcolor='#0e1117', plot_bgcolor='#0e1117', height=400, xaxis_tickangle=-45)
+                    st.plotly_chart(fig_poss, use_container_width=True)
+                with bc2:
+                    fig_xg = px.bar(
+                        ts_df, x='Match', y='xG', title='xG per Match',
+                        template='plotly_dark', color='xG',
+                        color_continuous_scale=['#ff4b4b', '#00ff85']
+                    )
+                    fig_xg.add_hline(y=avg_xg, line_dash='dash', line_color='#ffd700',
+                                     annotation_text=f'Avg: {avg_xg}', annotation_font_color='#ffd700')
+                    fig_xg.update_layout(paper_bgcolor='#0e1117', plot_bgcolor='#0e1117', height=400, xaxis_tickangle=-45)
+                    st.plotly_chart(fig_xg, use_container_width=True)
+
+                bc3, bc4 = st.columns(2)
+                with bc3:
+                    fig_tilt = px.bar(
+                        ts_df, x='Match', y='Field Tilt', title='Field Tilt % per Match',
+                        template='plotly_dark', color='Field Tilt',
+                        color_continuous_scale=['#ff4b4b', '#00ff85']
+                    )
+                    fig_tilt.add_hline(y=avg_tilt, line_dash='dash', line_color='#ffd700',
+                                       annotation_text=f'Avg: {avg_tilt}%', annotation_font_color='#ffd700')
+                    fig_tilt.update_layout(paper_bgcolor='#0e1117', plot_bgcolor='#0e1117', height=400, xaxis_tickangle=-45)
+                    st.plotly_chart(fig_tilt, use_container_width=True)
+                with bc4:
+                    fig_ppda = px.bar(
+                        ts_df, x='Match', y='PPDA', title='PPDA per Match',
+                        template='plotly_dark', color='PPDA',
+                        color_continuous_scale=['#00ff85', '#ff4b4b']
+                    )
+                    fig_ppda.add_hline(y=avg_ppda, line_dash='dash', line_color='#ffd700',
+                                       annotation_text=f'Avg: {avg_ppda}', annotation_font_color='#ffd700')
+                    fig_ppda.update_layout(paper_bgcolor='#0e1117', plot_bgcolor='#0e1117', height=400, xaxis_tickangle=-45)
+                    st.plotly_chart(fig_ppda, use_container_width=True)
+
+                st.divider()
+
+                # --- Average Team Pass Sonar ---
+                if not utd_df_t.empty:
+                    col_sonar, col_def = st.columns(2)
+                    with col_sonar:
+                        st.subheader("📡 Average Team Pass Sonar")
+                        t_passes = utd_df_t[(utd_df_t['Type'] == 1) & (utd_df_t['Outcome'] == 'Successful')]
+                        if not t_passes.empty:
+                            dx = t_passes['endX'] - t_passes['x']
+                            dy = t_passes['endY'] - t_passes['y']
+                            angles = np.arctan2(dy, dx)
+                            fig_ts, ax_ts = plt.subplots(figsize=(6, 6), subplot_kw={'projection': 'polar'})
+                            fig_ts.set_facecolor('#0e1117')
+                            ax_ts.set_facecolor('#0e1117')
+                            ax_ts.hist(angles, bins=24, color='#00ffff', alpha=0.7, edgecolor='white')
+                            ax_ts.set_theta_zero_location('E')
+                            ax_ts.set_yticks([])
+                            ax_ts.grid(color='#262730')
+                            ax_ts.tick_params(axis='x', colors='white')
+                            ax_ts.set_title(f'Team Pass Direction — {n_matches_t} Matches', color='white', fontsize=12, pad=20)
+                            st.pyplot(fig_ts)
+                            plt.close(fig_ts)
+
+                    # --- Average Defensive Heatmap + Line ---
+                    with col_def:
+                        st.subheader("🛡️ Average Defensive Heatmap")
+                        def_events_t = utd_df_t[utd_df_t['Type'].isin([4, 7, 8, 12])]
+                        fig_dh, ax_dh = plt.subplots(figsize=(10, 7))
+                        fig_dh.set_facecolor('#0e1117')
+                        ax_dh.set_facecolor('#0e1117')
+                        pitch_dh = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='white')
+                        pitch_dh.draw(ax=ax_dh)
+                        if not def_events_t.empty and len(def_events_t) >= 2:
+                            pitch_dh.kdeplot(def_events_t['x'].values, def_events_t['y'].values,
+                                             ax=ax_dh, cmap='viridis', fill=True, levels=100, alpha=0.6)
+                        if avg_def > 0:
+                            pitch_dh.lines(avg_def, 0, avg_def, 100, color='#ffd700', lw=3,
+                                           linestyle='dashed', alpha=0.9, ax=ax_dh,
+                                           label=f'Avg Def Line ({avg_def}m)')
+                            ax_dh.add_patch(mpatches.Rectangle((0, 0), avg_def, 100, alpha=0.1, color='#ffd700', ec=None))
+                            ax_dh.legend(facecolor='#262730', labelcolor='white')
+                        ax_dh.set_title(f'Defensive Actions — {n_matches_t} Matches', color='white', fontsize=12)
+                        st.pyplot(fig_dh)
+                        plt.close(fig_dh)
+            else:
+                st.error(f"Failed to load {mgr_short_t} match data.")
