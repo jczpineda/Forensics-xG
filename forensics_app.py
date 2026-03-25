@@ -1621,16 +1621,32 @@ for mgr_idx, manager in enumerate(managers):
                         (net_df['NextTeam'] == 'Manchester United')
                     ]
                     min_edge_count = 3 if n_matches > 1 else 1
+                    edges = pd.DataFrame(columns=['Player', 'NextPlayer', 'count'])
+                    if not connections.empty:
+                        edges = connections.groupby(['Player', 'NextPlayer']).size().reset_index(name='count')
+                        edges = edges[edges['count'] > min_edge_count]
+                    # Players with at least one connection
+                    connected_players = set(edges['Player'].tolist() + edges['NextPlayer'].tolist()) - {'Unknown'}
+                    connected_players = sorted(connected_players)
+
+                    selected_player_net = st.selectbox(
+                        "Highlight a player's connections:",
+                        options=["All Players"] + connected_players,
+                        key=f"net_player_{mgr_short}"
+                    )
+
                     fig_net, ax_net = plt.subplots(figsize=(10, 7))
                     fig_net.set_facecolor('#0e1117')
                     ax_net.set_facecolor('#0e1117')
                     pitch_net = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='white')
                     pitch_net.draw(ax=ax_net)
-                    if not connections.empty:
-                        edges = connections.groupby(['Player', 'NextPlayer']).size().reset_index(name='count')
-                        edges = edges[edges['count'] > min_edge_count]
-                        max_edge = edges['count'].max() if not edges.empty else 1
-                        for _, row in edges.iterrows():
+                    if not edges.empty:
+                        max_edge = edges['count'].max()
+                        if selected_player_net == "All Players":
+                            draw_edges = edges
+                        else:
+                            draw_edges = edges[(edges['Player'] == selected_player_net) | (edges['NextPlayer'] == selected_player_net)]
+                        for _, row in draw_edges.iterrows():
                             p1, p2 = row['Player'], row['NextPlayer']
                             if p1 in avg_pos.index and p2 in avg_pos.index:
                                 width = (row['count'] / max_edge) * 6
@@ -1638,8 +1654,13 @@ for mgr_idx, manager in enumerate(managers):
                                 pitch_net.lines(avg_pos.loc[p1].x, avg_pos.loc[p1].y,
                                                 avg_pos.loc[p2].x, avg_pos.loc[p2].y,
                                                 lw=width, color='#ff4b4b', alpha=alpha, ax=ax_net, zorder=1)
-                        for player in avg_pos.index:
-                            if player in pass_counts.index and player != 'Unknown':
+                        # Only show connected players
+                        if selected_player_net == "All Players":
+                            show_players = connected_players
+                        else:
+                            show_players = set(draw_edges['Player'].tolist() + draw_edges['NextPlayer'].tolist()) - {'Unknown'}
+                        for player in show_players:
+                            if player in avg_pos.index and player in pass_counts.index:
                                 s = min(pass_counts[player] * 2, 600)
                                 pitch_net.scatter(avg_pos.loc[player].x, avg_pos.loc[player].y,
                                                   s=s, color='#0e1117', edgecolors='white', linewidth=2, ax=ax_net, zorder=2)
