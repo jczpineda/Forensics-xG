@@ -671,7 +671,7 @@ for mgr_idx, manager in enumerate(managers):
                         st.divider()
                         m1, m2, m3, m4, m5, m6, m7, m8, m9 = st.columns(9)
                         m1.metric("⚽ Passing", f"{succ_passes}/{total_passes}", f"{pass_acc}%")
-                        m2.metric("🎯 Shooting", f"{goals} Goals" + (f" ({own_goals} OG)" if own_goals else ""), f"{total_shots} Shots")
+                        m2.metric("🎯 Shooting", f"{goals} Goals", f"{total_shots} Shots" + (f" · {own_goals} Own Goal{'s' if own_goals > 1 else ''}" if own_goals else ""))
                         m3.metric("📊 Possession", f"{possession}%", "Pass-Based")
                         m4.metric("📈 xG", f"{team_xg}", f"{goals} Actual Goals")
                         m5.metric("🛡️ Def. Actions", f"{total_def}", f"{tackles} Tackles")
