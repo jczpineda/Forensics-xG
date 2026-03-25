@@ -649,7 +649,8 @@ for mgr_idx, manager in enumerate(managers):
                         succ_passes = len(plot_df[(plot_df['Type'] == 1) & (plot_df['Outcome'] == 'Successful')])
                         pass_acc = round((succ_passes / total_passes * 100), 1) if total_passes > 0 else 0
                         total_shots = len(plot_df[plot_df['Type'].isin([13, 14, 15, 16])])
-                        goals = len(plot_df[plot_df['Type'] == 16])
+                        goals = len(plot_df[(plot_df['Type'] == 16) & (plot_df['Outcome'] != 'Own Goal')])
+                        own_goals = len(plot_df[(plot_df['Type'] == 16) & (plot_df['Outcome'] == 'Own Goal')])
                         tackles = len(plot_df[plot_df['Type'] == 7])
                         total_def = tackles + len(plot_df[plot_df['Type'] == 8]) + len(plot_df[plot_df['Type'] == 12])
                         fouls = len(plot_df[plot_df['Type'] == 4])
@@ -670,7 +671,7 @@ for mgr_idx, manager in enumerate(managers):
                         st.divider()
                         m1, m2, m3, m4, m5, m6, m7, m8, m9 = st.columns(9)
                         m1.metric("⚽ Passing", f"{succ_passes}/{total_passes}", f"{pass_acc}%")
-                        m2.metric("🎯 Shooting", f"{goals} Goals", f"{total_shots} Shots")
+                        m2.metric("🎯 Shooting", f"{goals} Goals" + (f" ({own_goals} OG)" if own_goals else ""), f"{total_shots} Shots")
                         m3.metric("📊 Possession", f"{possession}%", "Pass-Based")
                         m4.metric("📈 xG", f"{team_xg}", f"{goals} Actual Goals")
                         m5.metric("🛡️ Def. Actions", f"{total_def}", f"{tackles} Tackles")
