@@ -708,6 +708,36 @@ for mgr_idx, manager in enumerate(managers):
                         m9.metric("📏 Def. Line", f"{avg_rec_height}m", "Avg Recovery Height")
                         st.divider()
 
+                        # --- Match Event Log ---
+                        _TYPE_LABELS = {
+                            1: "Pass", 3: "Carry", 4: "Foul", 7: "Tackle",
+                            8: "Interception", 10: "Save", 11: "Claim",
+                            12: "Clearance", 13: "Miss", 14: "Post",
+                            15: "Shot Saved", 16: "Goal", 44: "Aerial",
+                            50: "GK Pick-Up", 51: "Punch", 52: "Goal Kick",
+                        }
+                        with st.expander("📋 Match Event Log", expanded=False):
+                            log_df = plot_df[['Minute', 'Player', 'Type', 'Outcome']].copy()
+                            log_df['Action'] = log_df['Type'].map(_TYPE_LABELS).fillna('Other')
+                            # Add xG for shot types and xT for passes/carries
+                            log_df['xG'] = plot_df['xG'].values
+                            log_df['xT'] = plot_df['xT_Added'].values
+                            log_df['xG'] = log_df.apply(lambda r: f"{r['xG']:.3f}" if r['Type'] in (13, 14, 15, 16) and r['xG'] > 0 else "", axis=1)
+                            log_df['xT'] = log_df.apply(lambda r: f"{r['xT']:.4f}" if r['Type'] in (1, 3) and r['xT'] != 0 else "", axis=1)
+
+                            action_types = sorted(log_df['Action'].unique())
+                            ev_c1, ev_c2 = st.columns(2)
+                            sel_actions = ev_c1.multiselect("Filter by action type", action_types, default=action_types, key=f"evlog_{manager}")
+                            sel_ev_player = ev_c2.selectbox("Filter by player", ["All"] + sorted(log_df['Player'].unique()), key=f"evpl_{manager}")
+                            filtered_log = log_df[log_df['Action'].isin(sel_actions)]
+                            if sel_ev_player != "All":
+                                filtered_log = filtered_log[filtered_log['Player'] == sel_ev_player]
+                            display_log = filtered_log[['Minute', 'Player', 'Action', 'Outcome', 'xG', 'xT']].sort_values('Minute').reset_index(drop=True)
+                            st.dataframe(display_log, use_container_width=True, height=350)
+                            st.caption(f"{len(display_log)} events shown")
+
+                        st.divider()
+
                         # --- Module Selection ---
                         st.markdown("#### 🗂️ Select Evidence Layers")
 
