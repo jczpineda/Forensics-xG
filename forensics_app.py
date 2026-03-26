@@ -736,6 +736,80 @@ for mgr_idx, manager in enumerate(managers):
                             st.dataframe(display_log, use_container_width=True, height=350)
                             st.caption(f"{len(display_log)} events shown")
 
+                        # --- Interactive Event Map (Plotly hover) ---
+                        with st.expander("🗺️ Interactive Event Map (hover for details)", expanded=False):
+                            _ACTION_COLORS = {
+                                "Pass": "#00ff85", "Carry": "#36d6e7", "Goal": "#ff4b4b",
+                                "Miss": "#ffa500", "Post": "#ffa500", "Shot Saved": "#ffa500",
+                                "Tackle": "#a855f7", "Interception": "#a855f7",
+                                "Clearance": "#64748b", "Foul": "#ef4444",
+                                "Aerial": "#eab308", "Save": "#3b82f6",
+                            }
+                            imap_df = plot_df.copy()
+                            imap_df['Action'] = imap_df['Type'].map(_TYPE_LABELS).fillna('Other')
+                            imap_df['hover_xG'] = imap_df.apply(lambda r: f"{r['xG']:.3f}" if r['Type'] in (13, 14, 15, 16) and r['xG'] > 0 else "—", axis=1)
+                            imap_df['hover_xT'] = imap_df.apply(lambda r: f"{r['xT_Added']:.4f}" if r['Type'] in (1, 3) and r['xT_Added'] != 0 else "—", axis=1)
+                            imap_df['color'] = imap_df['Action'].map(_ACTION_COLORS).fillna('#888888')
+
+                            imap_actions = sorted(imap_df['Action'].unique())
+                            sel_imap_actions = st.multiselect("Show action types", imap_actions, default=[a for a in ["Goal", "Miss", "Post", "Shot Saved", "Pass", "Carry", "Tackle", "Interception"] if a in imap_actions], key=f"imap_{manager}")
+                            imap_df = imap_df[imap_df['Action'].isin(sel_imap_actions)]
+
+                            import plotly.graph_objects as go
+                            fig_imap = go.Figure()
+
+                            # Draw pitch lines
+                            _line = dict(color="white", width=1.5)
+                            _pitch_shapes = [
+                                dict(type="rect", x0=0, y0=0, x1=100, y1=100, line=_line),  # outline
+                                dict(type="line", x0=50, y0=0, x1=50, y1=100, line=_line),   # halfway
+                                dict(type="circle", x0=40, y0=40, x1=60, y1=60, line=_line),  # center circle
+                                dict(type="rect", x0=0, y0=21.1, x1=17, y1=78.9, line=_line), # left box
+                                dict(type="rect", x0=83, y0=21.1, x1=100, y1=78.9, line=_line), # right box
+                                dict(type="rect", x0=0, y0=36.8, x1=5.8, y1=63.2, line=_line),  # left 6yd
+                                dict(type="rect", x0=94.2, y0=36.8, x1=100, y1=63.2, line=_line), # right 6yd
+                            ]
+
+                            # Scatter events grouped by action for legend toggle
+                            for action in sel_imap_actions:
+                                adf = imap_df[imap_df['Action'] == action]
+                                if adf.empty:
+                                    continue
+                                color = _ACTION_COLORS.get(action, '#888888')
+                                marker_size = 12 if action == "Goal" else 8
+                                marker_symbol = "star" if action == "Goal" else "circle"
+                                fig_imap.add_trace(go.Scatter(
+                                    x=adf['x'], y=adf['y'],
+                                    mode='markers',
+                                    marker=dict(size=marker_size, color=color, symbol=marker_symbol,
+                                                line=dict(width=1, color='white')),
+                                    name=action,
+                                    legendgroup=action,
+                                    customdata=np.column_stack([adf['Player'], adf['Minute'], adf['Outcome'], adf['hover_xG'], adf['hover_xT']]),
+                                    hovertemplate=(
+                                        "<b>%{customdata[0]}</b><br>"
+                                        "Action: " + action + "<br>"
+                                        "Minute: %{customdata[1]}'<br>"
+                                        "Outcome: %{customdata[2]}<br>"
+                                        "xG: %{customdata[3]}<br>"
+                                        "xT: %{customdata[4]}"
+                                        "<extra></extra>"
+                                    ),
+                                ))
+
+                            fig_imap.update_layout(
+                                shapes=_pitch_shapes,
+                                xaxis=dict(range=[-2, 102], showgrid=False, zeroline=False, showticklabels=False, constrain="domain"),
+                                yaxis=dict(range=[-2, 102], showgrid=False, zeroline=False, showticklabels=False, scaleanchor="x", scaleratio=0.68),
+                                plot_bgcolor='#0e1117', paper_bgcolor='#0e1117',
+                                font=dict(color='white'),
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+                                margin=dict(l=10, r=10, t=40, b=10),
+                                height=500,
+                                title=dict(text="Hover over any event for details", font=dict(size=13)),
+                            )
+                            st.plotly_chart(fig_imap, use_container_width=True)
+
                         st.divider()
 
                         # --- Module Selection ---
