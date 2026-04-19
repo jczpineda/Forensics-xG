@@ -317,7 +317,8 @@ CASE_DATABASE = {
             "vs Newcastle United (2)": "carrick.json/Newcastle United 2.JSON",
             "vs Crystal Palace (2)": "carrick.json/Crystal Palace 2.JSON",
             "vs AFC Bournemouth (2)": "carrick.json/AFC Bournemouth 2.JSON",
-            "vs Leeds United (2)": "carrick.json/Leeds United 2.JSON"
+            "vs Leeds United (2)": "carrick.json/Leeds United 2.JSON",
+            "vs Chelsea (2)": "carrick.json/Chelsea 2.JSON"
         },
         "stats_files": {}
     }
