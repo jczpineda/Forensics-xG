@@ -817,6 +817,15 @@ for mgr_idx, manager in enumerate(managers):
                         gk_options = [
                             "Shot Trajectory Map (GK View)", "Goal Kick Direction Map"
                         ]
+                        legacy_options = [
+                            "Expected Threat (xT) Grid (Legacy)",
+                            "Actions Leading to Shots (Legacy)",
+                            "Creator Map (Shot Assists) (Legacy)",
+                            "Defensive Actions (Legacy)",
+                            "The Architect (Build-Up Phase) (Legacy)",
+                            "Zone 14 & Half-Spaces (Legacy)",
+                            "Passing Network (Structure) (Legacy)"
+                        ]
 
                         row1_c1, row1_c2, row1_c3 = st.columns(3)
                         with row1_c1:
@@ -834,7 +843,13 @@ for mgr_idx, manager in enumerate(managers):
                         with row2_c3:
                             gk_mods = st.multiselect("🧤 Goalkeeping", gk_options, key=f"mgk_{manager}")
 
-                        modules = in_pos_mods + out_pos_mods + att_trans_mods + def_trans_mods + set_mods + gk_mods
+                        row3_c1, row3_c2 = st.columns([2, 1])
+                        with row3_c1:
+                            legacy_mods = st.multiselect("🧭 Legacy Telemetry", legacy_options, key=f"mlg_{manager}")
+                        with row3_c2:
+                            st.caption("Legacy maps now live inside Evidence Layers.")
+
+                        modules = in_pos_mods + out_pos_mods + att_trans_mods + def_trans_mods + set_mods + gk_mods + legacy_mods
 
                         # Reusable transition pairing for defensive-transition modules
                         losses_base = plot_df[(plot_df['Type'].isin([1, 3])) & (plot_df['Outcome'] == 'Unsuccessful')].sort_values('Index')
@@ -1139,161 +1154,123 @@ for mgr_idx, manager in enumerate(managers):
                         st.divider()
 
                         # --- Legacy telemetry maps (classic system) ---
-                        show_legacy = st.toggle("Include Legacy Match Telemetry Maps", value=True, key=f"legacy_toggle_{manager}")
-                        if show_legacy:
+                        legacy_pitch_mods = legacy_mods.copy()
+                        if legacy_pitch_mods:
                             st.markdown("#### 🧭 Legacy Telemetry Maps")
-                            legacy_options = [
-                                "Interactive Event Map (Legacy)",
-                                "Expected Threat (xT) Grid (Legacy)",
-                                "Actions Leading to Shots (Legacy)",
-                                "Creator Map (Shot Assists) (Legacy)",
-                                "Defensive Actions (Legacy)",
-                                "The Architect (Build-Up Phase) (Legacy)",
-                                "Zone 14 & Half-Spaces (Legacy)",
-                                "Passing Network (Structure) (Legacy)"
-                            ]
-                            legacy_mods = st.multiselect(
-                                "Select legacy maps",
-                                legacy_options,
-                                default=["Interactive Event Map (Legacy)", "Expected Threat (xT) Grid (Legacy)"],
-                                key=f"legacy_mods_{manager}"
-                            )
+                            fig_legacy, ax_legacy = plt.subplots(figsize=(10, 7))
+                            fig_legacy.set_facecolor('#0e1117')
+                            ax_legacy.set_facecolor('#0e1117')
+                            pitch_legacy = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='white')
+                            pitch_legacy.draw(ax=ax_legacy)
 
-                            if "Interactive Event Map (Legacy)" in legacy_mods:
-                                _TYPE_LABELS = {
-                                    1: "Pass", 3: "Carry", 4: "Foul", 7: "Tackle",
-                                    8: "Interception", 10: "Save", 11: "Claim",
-                                    12: "Clearance", 13: "Miss", 14: "Post",
-                                    15: "Shot Saved", 16: "Goal", 44: "Aerial",
-                                    50: "GK Pick-Up", 51: "Punch", 52: "Goal Kick",
-                                }
-                                _ACTION_COLORS = {
-                                    "Pass": "#00ff85", "Carry": "#36d6e7", "Goal": "#ff4b4b",
-                                    "Miss": "#ffa500", "Post": "#ffa500", "Shot Saved": "#ffa500",
-                                    "Tackle": "#a855f7", "Interception": "#a855f7",
-                                    "Clearance": "#64748b", "Foul": "#ef4444",
-                                    "Aerial": "#eab308", "Save": "#3b82f6",
-                                }
-                                legacy_df = plot_df.copy()
-                                legacy_df['Action'] = legacy_df['Type'].map(_TYPE_LABELS).fillna('Other')
-                                legacy_df['hover_xG'] = legacy_df.apply(lambda r: f"{r['xG']:.3f}" if r['Type'] in (13, 14, 15, 16) and r['xG'] > 0 else "-", axis=1)
-                                legacy_df['hover_xT'] = legacy_df.apply(lambda r: f"{r['xT_Added']:.4f}" if r['Type'] in (1, 3) and r['xT_Added'] != 0 else "-", axis=1)
+                            has_legacy_values = False
 
-                                chosen = st.multiselect(
-                                    "Legacy event actions",
-                                    sorted(legacy_df['Action'].unique()),
-                                    default=[a for a in ["Goal", "Miss", "Post", "Shot Saved", "Pass", "Carry", "Tackle", "Interception"] if a in legacy_df['Action'].unique()],
-                                    key=f"legacy_actions_{manager}"
-                                )
-                                legacy_df = legacy_df[legacy_df['Action'].isin(chosen)]
-                                fig_legacy_events = _make_plotly_pitch("Legacy Interactive Event Map")
-                                for action in chosen:
-                                    adf = legacy_df[legacy_df['Action'] == action]
-                                    if adf.empty:
-                                        continue
-                                    color = _ACTION_COLORS.get(action, '#888888')
-                                    marker_size = 12 if action == "Goal" else 8
-                                    marker_symbol = "star" if action == "Goal" else "circle"
-                                    fig_legacy_events.add_trace(go.Scatter(
-                                        x=adf['x'], y=adf['y'], mode='markers',
-                                        marker=dict(size=marker_size, color=color, symbol=marker_symbol, line=dict(width=1, color='white')),
-                                        name=action,
-                                        customdata=np.column_stack([adf['Player'], adf['Minute'], adf['Outcome'], adf['hover_xG'], adf['hover_xT']]),
-                                        hovertemplate=(
-                                            "<b>%{customdata[0]}</b><br>"
-                                            "Action: " + action + "<br>"
-                                            "Minute: %{customdata[1]}'<br>"
-                                            "Outcome: %{customdata[2]}<br>"
-                                            "xG: %{customdata[3]}<br>"
-                                            "xT: %{customdata[4]}<extra></extra>"
-                                        ),
-                                    ))
-                                st.plotly_chart(fig_legacy_events, use_container_width=True)
+                            if "Expected Threat (xT) Grid (Legacy)" in legacy_pitch_mods:
+                                xt_acts = viz_df[(viz_df['Type'].isin([1, 3])) & (viz_df['Outcome'] == 'Successful') & (viz_df['xT_Added'] > 0)]
+                                if not xt_acts.empty:
+                                    has_legacy_values = True
+                                    bin_stat = pitch_legacy.bin_statistic(
+                                        xt_acts['x'].values,
+                                        xt_acts['y'].values,
+                                        values=xt_acts['xT_Added'].values,
+                                        statistic='sum',
+                                        bins=(12, 8)
+                                    )
+                                    pitch_legacy.heatmap(bin_stat, ax=ax_legacy, cmap='magma', alpha=0.7, edgecolors='#262730', lw=1, zorder=0)
+                                    stat = bin_stat['statistic']
+                                    cx = bin_stat['cx']
+                                    cy = bin_stat['cy']
+                                    for row_i in range(stat.shape[0]):
+                                        for col_j in range(stat.shape[1]):
+                                            val = stat[row_i, col_j]
+                                            if val > 0.001:
+                                                ax_legacy.text(
+                                                    cx[row_i, col_j], cy[row_i, col_j], f'{val:.3f}',
+                                                    color='white', ha='center', va='center', fontsize=9, fontweight='bold', zorder=2
+                                                )
 
-                            legacy_pitch_mods = [m for m in legacy_mods if m != "Interactive Event Map (Legacy)"]
-                            if legacy_pitch_mods:
-                                fig_legacy, ax_legacy = plt.subplots(figsize=(10, 7))
-                                fig_legacy.set_facecolor('#0e1117')
-                                ax_legacy.set_facecolor('#0e1117')
-                                pitch_legacy = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='white')
-                                pitch_legacy.draw(ax=ax_legacy)
+                            if "Actions Leading to Shots (Legacy)" in legacy_pitch_mods:
+                                shots_df = viz_df[viz_df['Type'].isin([13, 14, 15, 16])]
+                                if not shots_df.empty:
+                                    has_legacy_values = True
+                                for _, shot in shots_df.iterrows():
+                                    if shot['Type'] == 16 and shot['Outcome'] != 'Own Goal':
+                                        color, marker, size = '#00ff85', '*', 350
+                                    elif shot['isBlocked']:
+                                        color, marker, size = '#aaaaaa', 'X', 180
+                                    elif shot['Type'] == 15:
+                                        color, marker, size = '#ffd700', 'o', 180
+                                    else:
+                                        color, marker, size = '#ff4b4b', 'x', 180
+                                    pitch_legacy.scatter(shot.x, shot.y, s=size, marker=marker, c=color, edgecolors='white', ax=ax_legacy, zorder=4)
 
-                                if "Expected Threat (xT) Grid (Legacy)" in legacy_pitch_mods:
-                                    xt_acts = viz_df[(viz_df['Type'].isin([1, 3])) & (viz_df['Outcome'] == 'Successful') & (viz_df['xT_Added'] > 0)]
-                                    if not xt_acts.empty:
-                                        bin_stat = pitch_legacy.bin_statistic(xt_acts['x'].values, xt_acts['y'].values, values=xt_acts['xT_Added'].values, statistic='sum', bins=(12, 8))
-                                        pitch_legacy.heatmap(bin_stat, ax=ax_legacy, cmap='magma', alpha=0.7, edgecolors='#262730', lw=1, zorder=0)
+                            if "Creator Map (Shot Assists) (Legacy)" in legacy_pitch_mods:
+                                shots_for_assists = viz_df[viz_df['Type'].isin([13, 14, 15, 16])]
+                                key_passes = []
+                                for _, shot in shots_for_assists.iterrows():
+                                    prev = viz_df[(viz_df['Index'] < shot['Index']) & (viz_df['Index'] >= shot['Index'] - 5)]
+                                    prev_pass = prev[(prev['Type'] == 1) & (prev['Outcome'] == 'Successful')]
+                                    if not prev_pass.empty:
+                                        key_passes.append(prev_pass.iloc[-1])
+                                if key_passes:
+                                    has_legacy_values = True
+                                    kp_df = pd.DataFrame(key_passes)
+                                    pitch_legacy.arrows(
+                                        kp_df['x'].values, kp_df['y'].values, kp_df['endX'].values, kp_df['endY'].values,
+                                        width=2, headwidth=4, color='#00ffff', alpha=0.6, ax=ax_legacy, label='Key Pass'
+                                    )
 
-                                if "Actions Leading to Shots (Legacy)" in legacy_pitch_mods:
-                                    shots_df = viz_df[viz_df['Type'].isin([13, 14, 15, 16])]
-                                    for _, shot in shots_df.iterrows():
-                                        if shot['Type'] == 16 and shot['Outcome'] != 'Own Goal':
-                                            color, marker, size = '#00ff85', '*', 350
-                                        elif shot['isBlocked']:
-                                            color, marker, size = '#aaaaaa', 'X', 180
-                                        elif shot['Type'] == 15:
-                                            color, marker, size = '#ffd700', 'o', 180
-                                        else:
-                                            color, marker, size = '#ff4b4b', 'x', 180
-                                        pitch_legacy.scatter(shot.x, shot.y, s=size, marker=marker, c=color, edgecolors='white', ax=ax_legacy, zorder=4)
+                            if "Defensive Actions (Legacy)" in legacy_pitch_mods:
+                                def_act = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
+                                if not def_act.empty:
+                                    has_legacy_values = True
+                                    tackles_df = def_act[def_act['Type'] == 7]
+                                    interceptions_df = def_act[def_act['Type'] == 8]
+                                    if not tackles_df.empty:
+                                        pitch_legacy.scatter(tackles_df['x'].values, tackles_df['y'].values, s=140, marker='d', c='#3399ff', edgecolors='white', ax=ax_legacy, label='Tackle')
+                                    if not interceptions_df.empty:
+                                        pitch_legacy.scatter(interceptions_df['x'].values, interceptions_df['y'].values, s=140, marker='s', c='#ff9900', edgecolors='black', ax=ax_legacy, label='Interception')
 
-                                if "Creator Map (Shot Assists) (Legacy)" in legacy_pitch_mods:
-                                    shots_for_assists = viz_df[viz_df['Type'].isin([13, 14, 15, 16])]
-                                    key_passes = []
-                                    for _, shot in shots_for_assists.iterrows():
-                                        prev = viz_df[(viz_df['Index'] < shot['Index']) & (viz_df['Index'] >= shot['Index'] - 5)]
-                                        prev_pass = prev[(prev['Type'] == 1) & (prev['Outcome'] == 'Successful')]
-                                        if not prev_pass.empty:
-                                            key_passes.append(prev_pass.iloc[-1])
-                                    if key_passes:
-                                        kp_df = pd.DataFrame(key_passes)
-                                        pitch_legacy.arrows(kp_df['x'].values, kp_df['y'].values, kp_df['endX'].values, kp_df['endY'].values,
-                                                            width=2, headwidth=4, color='#00ffff', alpha=0.6, ax=ax_legacy, label='Key Pass')
+                            if "The Architect (Build-Up Phase) (Legacy)" in legacy_pitch_mods:
+                                build_up = viz_df[(viz_df['Type'] == 1) & (viz_df['x'] < 33)]
+                                if not build_up.empty:
+                                    has_legacy_values = True
+                                    pitch_legacy.lines(build_up['x'].values, build_up['y'].values, build_up['endX'].values, build_up['endY'].values,
+                                                       color='#00ffff', alpha=0.45, lw=2, ax=ax_legacy, label='Build-Up')
 
-                                if "Defensive Actions (Legacy)" in legacy_pitch_mods:
-                                    def_act = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
-                                    if not def_act.empty:
-                                        tackles_df = def_act[def_act['Type'] == 7]
-                                        interceptions_df = def_act[def_act['Type'] == 8]
-                                        if not tackles_df.empty:
-                                            pitch_legacy.scatter(tackles_df['x'].values, tackles_df['y'].values, s=140, marker='d', c='#3399ff', edgecolors='white', ax=ax_legacy, label='Tackle')
-                                        if not interceptions_df.empty:
-                                            pitch_legacy.scatter(interceptions_df['x'].values, interceptions_df['y'].values, s=140, marker='s', c='#ff9900', edgecolors='black', ax=ax_legacy, label='Interception')
+                            if "Zone 14 & Half-Spaces (Legacy)" in legacy_pitch_mods:
+                                has_legacy_values = True
+                                for xmin, xmax, ymin, ymax, color in [
+                                    (65, 85, 37, 63, '#ffd700'),
+                                    (65, 85, 20, 37, '#ff4b4b'),
+                                    (65, 85, 63, 80, '#ff4b4b')
+                                ]:
+                                    ax_legacy.add_patch(mpatches.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, alpha=0.15, color=color, ec='white', lw=1.2, zorder=1))
 
-                                if "The Architect (Build-Up Phase) (Legacy)" in legacy_pitch_mods:
-                                    build_up = viz_df[(viz_df['Type'] == 1) & (viz_df['x'] < 33)]
-                                    if not build_up.empty:
-                                        pitch_legacy.lines(build_up['x'].values, build_up['y'].values, build_up['endX'].values, build_up['endY'].values,
-                                                           color='#00ffff', alpha=0.45, lw=2, ax=ax_legacy, label='Build-Up')
+                            if "Passing Network (Structure) (Legacy)" in legacy_pitch_mods:
+                                net_df = viz_df.copy()
+                                avg_pos = net_df.groupby('Player')[['x', 'y']].mean()
+                                net_df['NextPlayer'] = net_df['Player'].shift(-1)
+                                net_df['NextTeam'] = net_df['Team'].shift(-1)
+                                edges = net_df[(net_df['Type'] == 1) & (net_df['Outcome'] == 'Successful') & (net_df['NextTeam'] == sel_team)]
+                                if not edges.empty:
+                                    has_legacy_values = True
+                                    links = edges.groupby(['Player', 'NextPlayer']).size().reset_index(name='count')
+                                    links = links[links['count'] > 2]
+                                    for _, row in links.iterrows():
+                                        p1, p2 = row['Player'], row['NextPlayer']
+                                        if p1 in avg_pos.index and p2 in avg_pos.index:
+                                            pitch_legacy.lines(avg_pos.loc[p1].x, avg_pos.loc[p1].y, avg_pos.loc[p2].x, avg_pos.loc[p2].y,
+                                                               lw=row['count'] * 0.5, color='#ff4b4b', alpha=0.5, ax=ax_legacy, zorder=1)
 
-                                if "Zone 14 & Half-Spaces (Legacy)" in legacy_pitch_mods:
-                                    for xmin, xmax, ymin, ymax, color in [
-                                        (65, 85, 37, 63, '#ffd700'),
-                                        (65, 85, 20, 37, '#ff4b4b'),
-                                        (65, 85, 63, 80, '#ff4b4b')
-                                    ]:
-                                        ax_legacy.add_patch(mpatches.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, alpha=0.15, color=color, ec='white', lw=1.2, zorder=1))
+                            if not has_legacy_values:
+                                pitch_legacy.annotate("No legacy values available for current filters", xy=(50, 50), c='white', ha='center', va='center', size=12, ax=ax_legacy)
 
-                                if "Passing Network (Structure) (Legacy)" in legacy_pitch_mods:
-                                    net_df = viz_df.copy()
-                                    avg_pos = net_df.groupby('Player')[['x', 'y']].mean()
-                                    net_df['NextPlayer'] = net_df['Player'].shift(-1)
-                                    net_df['NextTeam'] = net_df['Team'].shift(-1)
-                                    edges = net_df[(net_df['Type'] == 1) & (net_df['Outcome'] == 'Successful') & (net_df['NextTeam'] == sel_team)]
-                                    if not edges.empty:
-                                        links = edges.groupby(['Player', 'NextPlayer']).size().reset_index(name='count')
-                                        links = links[links['count'] > 2]
-                                        for _, row in links.iterrows():
-                                            p1, p2 = row['Player'], row['NextPlayer']
-                                            if p1 in avg_pos.index and p2 in avg_pos.index:
-                                                pitch_legacy.lines(avg_pos.loc[p1].x, avg_pos.loc[p1].y, avg_pos.loc[p2].x, avg_pos.loc[p2].y,
-                                                                   lw=row['count'] * 0.5, color='#ff4b4b', alpha=0.5, ax=ax_legacy, zorder=1)
-
-                                handles, labels = ax_legacy.get_legend_handles_labels()
-                                if handles:
-                                    ax_legacy.legend(facecolor='#262730', labelcolor='white', loc='upper left')
-                                st.pyplot(fig_legacy)
-                                plt.close(fig_legacy)
+                            handles, _ = ax_legacy.get_legend_handles_labels()
+                            if handles:
+                                ax_legacy.legend(facecolor='#262730', labelcolor='white', loc='upper left')
+                            st.pyplot(fig_legacy)
+                            plt.close(fig_legacy)
 
                         # --- Leaders moved below all telemetry charts ---
                         st.divider()
