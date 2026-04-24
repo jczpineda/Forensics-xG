@@ -6,6 +6,7 @@ import requests
 import math
 from mplsoccer import Pitch
 import plotly.express as px
+import plotly.graph_objects as go
 import matplotlib.patches as mpatches
 import matplotlib.lines as mlines
 from scipy.spatial import ConvexHull
@@ -316,9 +317,7 @@ CASE_DATABASE = {
             "vs Everton (2)": "carrick.json/Everton 2.JSON",
             "vs Newcastle United (2)": "carrick.json/Newcastle United 2.JSON",
             "vs Crystal Palace (2)": "carrick.json/Crystal Palace 2.JSON",
-            "vs AFC Bournemouth (2)": "carrick.json/AFC Bournemouth 2.JSON",
-            "vs Leeds United (2)": "carrick.json/Leeds United 2.JSON",
-            "vs Chelsea (2)": "carrick.json/Chelsea 2.JSON"
+            "vs AFC Bournemouth (2)": "carrick.json/AFC Bournemouth 2.JSON"
         },
         "stats_files": {}
     }
@@ -536,6 +535,77 @@ def _fix_gk_positions(def_avg, source_df):
     return def_avg
 
 
+def _make_plotly_pitch(title):
+    """Create a reusable Opta-like pitch in Plotly coordinates (0-100)."""
+    line = dict(color="white", width=1.5)
+    shapes = [
+        dict(type="rect", x0=0, y0=0, x1=100, y1=100, line=line),
+        dict(type="line", x0=50, y0=0, x1=50, y1=100, line=line),
+        dict(type="circle", x0=40, y0=40, x1=60, y1=60, line=line),
+        dict(type="rect", x0=0, y0=21.1, x1=17, y1=78.9, line=line),
+        dict(type="rect", x0=83, y0=21.1, x1=100, y1=78.9, line=line),
+        dict(type="rect", x0=0, y0=36.8, x1=5.8, y1=63.2, line=line),
+        dict(type="rect", x0=94.2, y0=36.8, x1=100, y1=63.2, line=line),
+    ]
+
+    fig = go.Figure()
+    fig.update_layout(
+        title=title,
+        shapes=shapes,
+        xaxis=dict(range=[-2, 102], showgrid=False, zeroline=False, showticklabels=False, constrain="domain"),
+        yaxis=dict(range=[-2, 102], showgrid=False, zeroline=False, showticklabels=False, scaleanchor="x", scaleratio=0.68),
+        plot_bgcolor='#0e1117',
+        paper_bgcolor='#0e1117',
+        font=dict(color='white'),
+        margin=dict(l=10, r=10, t=45, b=10),
+        height=520,
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="center", x=0.5)
+    )
+    return fig
+
+
+def _add_plotly_action_lines(fig, df, name, color, dash='solid', width=2, marker_symbol='circle', marker_size=8):
+    """Draw action vectors plus event-end markers with player/minute hover."""
+    if df.empty:
+        return
+
+    xs, ys = [], []
+    for _, r in df.iterrows():
+        xs.extend([r['x'], r['endX'], None])
+        ys.extend([r['y'], r['endY'], None])
+
+    fig.add_trace(go.Scatter(
+        x=xs,
+        y=ys,
+        mode='lines',
+        line=dict(color=color, width=width, dash=dash),
+        name=name,
+        hoverinfo='skip',
+        legendgroup=name,
+    ))
+
+    custom = np.column_stack([
+        df['Player'].astype(str),
+        df['Minute'].astype(int),
+        df['Outcome'].astype(str),
+    ])
+    fig.add_trace(go.Scatter(
+        x=df['endX'],
+        y=df['endY'],
+        mode='markers',
+        marker=dict(color=color, size=marker_size, symbol=marker_symbol, line=dict(color='white', width=1)),
+        name=f"{name} End",
+        showlegend=False,
+        legendgroup=name,
+        customdata=custom,
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "Minute: %{customdata[1]}'<br>"
+            "Outcome: %{customdata[2]}<extra></extra>"
+        ),
+    ))
+
+
 # --- 6. INTERFACE ---
 st.markdown("""
     <style>
@@ -710,887 +780,369 @@ for mgr_idx, manager in enumerate(managers):
                         m9.metric("📏 Def. Line", f"{avg_rec_height}m", "Avg Recovery Height")
                         st.divider()
 
-                        # --- Interactive Event Map (Plotly hover) ---
-                        _TYPE_LABELS = {
-                            1: "Pass", 3: "Carry", 4: "Foul", 7: "Tackle",
-                            8: "Interception", 10: "Save", 11: "Claim",
-                            12: "Clearance", 13: "Miss", 14: "Post",
-                            15: "Shot Saved", 16: "Goal", 44: "Aerial",
-                            50: "GK Pick-Up", 51: "Punch", 52: "Goal Kick",
-                        }
-                        with st.expander("🗺️ Interactive Event Map (hover for details)", expanded=False):
-                            _ACTION_COLORS = {
-                                "Pass": "#00ff85", "Carry": "#36d6e7", "Goal": "#ff4b4b",
-                                "Miss": "#ffa500", "Post": "#ffa500", "Shot Saved": "#ffa500",
-                                "Tackle": "#a855f7", "Interception": "#a855f7",
-                                "Clearance": "#64748b", "Foul": "#ef4444",
-                                "Aerial": "#eab308", "Save": "#3b82f6",
-                            }
-                            imap_df = plot_df.copy()
-                            imap_df['Action'] = imap_df['Type'].map(_TYPE_LABELS).fillna('Other')
-                            imap_df['hover_xG'] = imap_df.apply(lambda r: f"{r['xG']:.3f}" if r['Type'] in (13, 14, 15, 16) and r['xG'] > 0 else "—", axis=1)
-                            imap_df['hover_xT'] = imap_df.apply(lambda r: f"{r['xT_Added']:.4f}" if r['Type'] in (1, 3) and r['xT_Added'] != 0 else "—", axis=1)
-                            imap_df['color'] = imap_df['Action'].map(_ACTION_COLORS).fillna('#888888')
+                        # --- Team progression insights ---
+                        prog_passes = plot_df[
+                            (plot_df['Type'] == 1) &
+                            (plot_df['Outcome'] == 'Successful') &
+                            ((plot_df['endX'] - plot_df['x']) >= 10)
+                        ]
+                        zone14_passes = plot_df[
+                            (plot_df['Type'] == 1) &
+                            (plot_df['Outcome'] == 'Successful') &
+                            (plot_df['endX'].between(65, 85)) &
+                            (plot_df['endY'].between(37, 63))
+                        ]
 
-                            imap_actions = sorted(imap_df['Action'].unique())
-                            sel_imap_actions = st.multiselect("Show action types", imap_actions, default=[a for a in ["Goal", "Miss", "Post", "Shot Saved", "Pass", "Carry", "Tackle", "Interception"] if a in imap_actions], key=f"imap_{manager}")
-                            imap_df = imap_df[imap_df['Action'].isin(sel_imap_actions)]
-
-                            import plotly.graph_objects as go
-                            fig_imap = go.Figure()
-
-                            # Draw pitch lines
-                            _line = dict(color="white", width=1.5)
-                            _pitch_shapes = [
-                                dict(type="rect", x0=0, y0=0, x1=100, y1=100, line=_line),  # outline
-                                dict(type="line", x0=50, y0=0, x1=50, y1=100, line=_line),   # halfway
-                                dict(type="circle", x0=40, y0=40, x1=60, y1=60, line=_line),  # center circle
-                                dict(type="rect", x0=0, y0=21.1, x1=17, y1=78.9, line=_line), # left box
-                                dict(type="rect", x0=83, y0=21.1, x1=100, y1=78.9, line=_line), # right box
-                                dict(type="rect", x0=0, y0=36.8, x1=5.8, y1=63.2, line=_line),  # left 6yd
-                                dict(type="rect", x0=94.2, y0=36.8, x1=100, y1=63.2, line=_line), # right 6yd
-                            ]
-
-                            # Scatter events grouped by action for legend toggle
-                            for action in sel_imap_actions:
-                                adf = imap_df[imap_df['Action'] == action]
-                                if adf.empty:
-                                    continue
-                                color = _ACTION_COLORS.get(action, '#888888')
-                                marker_size = 12 if action == "Goal" else 8
-                                marker_symbol = "star" if action == "Goal" else "circle"
-                                fig_imap.add_trace(go.Scatter(
-                                    x=adf['x'], y=adf['y'],
-                                    mode='markers',
-                                    marker=dict(size=marker_size, color=color, symbol=marker_symbol,
-                                                line=dict(width=1, color='white')),
-                                    name=action,
-                                    legendgroup=action,
-                                    customdata=np.column_stack([adf['Player'], adf['Minute'], adf['Outcome'], adf['hover_xG'], adf['hover_xT']]),
-                                    hovertemplate=(
-                                        "<b>%{customdata[0]}</b><br>"
-                                        "Action: " + action + "<br>"
-                                        "Minute: %{customdata[1]}'<br>"
-                                        "Outcome: %{customdata[2]}<br>"
-                                        "xG: %{customdata[3]}<br>"
-                                        "xT: %{customdata[4]}"
-                                        "<extra></extra>"
-                                    ),
-                                ))
-
-                            fig_imap.update_layout(
-                                shapes=_pitch_shapes,
-                                xaxis=dict(range=[-2, 102], showgrid=False, zeroline=False, showticklabels=False, constrain="domain"),
-                                yaxis=dict(range=[-2, 102], showgrid=False, zeroline=False, showticklabels=False, scaleanchor="x", scaleratio=0.68),
-                                plot_bgcolor='#0e1117', paper_bgcolor='#0e1117',
-                                font=dict(color='white'),
-                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-                                margin=dict(l=10, r=10, t=40, b=10),
-                                height=500,
-                                title=dict(text="Hover over any event for details", font=dict(size=13)),
-                            )
-                            st.plotly_chart(fig_imap, use_container_width=True)
+                        st.subheader("🏁 Team Progression Leaders")
+                        l1, l2 = st.columns(2)
+                        with l1:
+                            st.caption("Progressive passes (>= +10 Opta x-units)")
+                            prog_leaders = prog_passes.groupby('Player').size().reset_index(name='Progressive Passes').sort_values('Progressive Passes', ascending=False)
+                            st.dataframe(prog_leaders.head(8), use_container_width=True, hide_index=True)
+                        with l2:
+                            st.caption("Passes completed into Zone 14")
+                            z14_leaders = zone14_passes.groupby('Player').size().reset_index(name='Zone 14 Passes').sort_values('Zone 14 Passes', ascending=False)
+                            st.dataframe(z14_leaders.head(8), use_container_width=True, hide_index=True)
 
                         st.divider()
-
-                        # --- Module Selection ---
                         st.markdown("#### 🗂️ Select Evidence Layers")
 
-                        off_options = [
-                            "Actions Leading to Shots", "Counter Attacks (Rapid Transitions)", "Creator Map (Shot Assists)",
-                            "Attacking Zones (5 Lanes)", "Zone Invasions", "The Pulse (Shot Race)", "The Breakout (Progressive Carries)",
-                            "The Air Raid (Crossing Zones)", "Average Offensive Positions", "Matchup: Offense vs Opp. Defense",
-                            "High-Value Actions (xT Map)", "Expected Threat (xT) Grid", "Cumulative Threat Race (xT)",
-                            "Player Impact Board (xT Created)", "Transition Passing Breakdown"
+                        in_pos_options = [
+                            "Progressive Passes Map", "Passes into Zone 14", "Pass Map", "Passing Heatmap"
                         ]
-                        def_options = [
-                            "Defensive Shield (Heatmap + Line)", "Duel Map (Tackles Won/Lost)", "Impact Zone (Convex Hull)",
-                            "Defensive Actions", "Average Defensive Positions", "Matchup: Defense vs Opp. Offense",
-                            "Zonal Defensive Pressure Map", "Defensive Penetration Conceded", "Zones of Responsibility (Voronoi)"
+                        out_pos_options = [
+                            "Defensive Actions Map", "Defensive Shield (Heatmap + Line)"
                         ]
-                        pos_options = [
-                            "The Architect (Build-Up Phase)", "Momentum Map", "Game Control (Possession)", "Zone 14 & Half-Spaces",
-                            "Passing Network (Structure)", "Pass Sonar (Radar)", "Pass Map", "Passing Heatmap", "General Heatmap",
-                            "Zonal Passing Control Map", "Switches of Play (Long Diagonals)"
+                        att_trans_options = [
+                            "Progression Trajectory Lines", "Time-to-Shot Scatter Plot"
+                        ]
+                        def_trans_options = [
+                            "Recovery vs. Loss Maps", "Defensive Reaction Time/Distance Curves"
                         ]
                         set_options = [
                             "Set Piece Targeting (Corners)", "Free Kick Targeting"
                         ]
+                        gk_options = [
+                            "Shot Trajectory Map (GK View)", "Goal Kick Direction Map"
+                        ]
 
-                        c_off, c_def, c_pos, c_set = st.columns(4)
-                        with c_off:
-                            off_mods = st.multiselect("⚔️ Offensive", off_options, default=["Expected Threat (xT) Grid"], key=f"mo_{manager}")
-                        with c_def:
-                            def_mods = st.multiselect("🛡️ Defensive", def_options, key=f"md_{manager}")
-                        with c_pos:
-                            pos_mods = st.multiselect("⚽ Possession", pos_options, key=f"mp_{manager}")
-                        with c_set:
-                            set_mods = st.multiselect("🎯 Set-Pieces", set_options, key=f"ms_{manager}")
+                        row1_c1, row1_c2, row1_c3 = st.columns(3)
+                        with row1_c1:
+                            in_pos_mods = st.multiselect("🟢 In-Possession", in_pos_options, default=["Progressive Passes Map"], key=f"mip_{manager}")
+                        with row1_c2:
+                            out_pos_mods = st.multiselect("🔴 Out of Possession", out_pos_options, key=f"mop_{manager}")
+                        with row1_c3:
+                            att_trans_mods = st.multiselect("⚡ Attacking Transition", att_trans_options, key=f"mat_{manager}")
 
-                        modules = off_mods + def_mods + pos_mods + set_mods
+                        row2_c1, row2_c2, row2_c3 = st.columns(3)
+                        with row2_c1:
+                            def_trans_mods = st.multiselect("🧯 Defensive Transition", def_trans_options, key=f"mdt_{manager}")
+                        with row2_c2:
+                            set_mods = st.multiselect("🎯 Set-Pieces", set_options, key=f"msp_{manager}")
+                        with row2_c3:
+                            gk_mods = st.multiselect("🧤 Goalkeeping", gk_options, key=f"mgk_{manager}")
 
-                        # --- NON-PITCH MODULES (CHARTS) ---
-                        if "Pass Sonar (Radar)" in modules:
-                            st.subheader("📡 Pass Sonar (Distribution Angles)")
-                            if sel_player == "All Players":
-                                st.info("⚠️ Please select a specific player from the dropdown above to view their Pass Sonar.")
+                        modules = in_pos_mods + out_pos_mods + att_trans_mods + def_trans_mods + set_mods + gk_mods
+
+                        # Reusable transition pairing for defensive-transition modules
+                        losses_base = plot_df[(plot_df['Type'].isin([1, 3])) & (plot_df['Outcome'] == 'Unsuccessful')].sort_values('Index')
+                        transitions = []
+                        for _, loss in losses_base.iterrows():
+                            rec = match_df[
+                                (match_df['Index'] > loss['Index']) &
+                                (match_df['Index'] <= loss['Index'] + 25) &
+                                (match_df['Team'] == sel_team) &
+                                (match_df['Type'].isin([7, 8, 12]))
+                            ].sort_values('Index').head(1)
+                            if rec.empty:
+                                continue
+                            r = rec.iloc[0]
+                            transitions.append({
+                                'loss_x': loss['x'], 'loss_y': loss['y'], 'loss_player': loss['Player'], 'loss_min': int(loss['Minute']), 'loss_idx': int(loss['Index']),
+                                'rec_x': r['x'], 'rec_y': r['y'], 'rec_player': r['Player'], 'rec_min': int(r['Minute']), 'rec_idx': int(r['Index'])
+                            })
+                        transitions_df = pd.DataFrame(transitions)
+
+                        # --- In-Possession ---
+                        if "Progressive Passes Map" in modules:
+                            st.subheader("🟢 Progressive Passes Map")
+                            fig_pp = _make_plotly_pitch(f"{sel_team} Progressive Passes")
+                            _add_plotly_action_lines(fig_pp, prog_passes, "Progressive Pass", "#00ff85", width=2)
+                            st.plotly_chart(fig_pp, use_container_width=True)
+
+                        if "Passes into Zone 14" in modules:
+                            st.subheader("🟢 Passes into Zone 14")
+                            fig_z14 = _make_plotly_pitch("Entries Into Zone 14")
+                            fig_z14.add_shape(type='rect', x0=65, y0=37, x1=85, y1=63, line=dict(color='#ffd700', width=2), fillcolor='rgba(255,215,0,0.15)')
+                            _add_plotly_action_lines(fig_z14, zone14_passes, "Zone 14 Entry", "#ffd700", width=3)
+                            st.plotly_chart(fig_z14, use_container_width=True)
+
+                        if "Pass Map" in modules:
+                            st.subheader("🟢 Pass Map")
+                            fig_pm = _make_plotly_pitch("Completed vs Failed Passes")
+                            succ_passes_df = viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful')]
+                            fail_passes_df = viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Unsuccessful')]
+                            _add_plotly_action_lines(fig_pm, succ_passes_df, "Successful", "#00ff85", width=2)
+                            _add_plotly_action_lines(fig_pm, fail_passes_df, "Unsuccessful", "#ff4b4b", width=2, dash='dot')
+                            st.plotly_chart(fig_pm, use_container_width=True)
+
+                        if "Passing Heatmap" in modules:
+                            st.subheader("🟢 Passing Heatmap")
+                            pass_heat = viz_df[viz_df['Type'] == 1]
+                            if not pass_heat.empty:
+                                fig_ph = _make_plotly_pitch("Pass Origin Density")
+                                fig_ph.add_trace(go.Histogram2d(
+                                    x=pass_heat['x'], y=pass_heat['y'], nbinsx=20, nbinsy=14,
+                                    colorscale='Turbo', reversescale=False, opacity=0.75,
+                                    showscale=True, colorbar=dict(title='Passes')
+                                ))
+                                st.plotly_chart(fig_ph, use_container_width=True)
                             else:
-                                p_passes = plot_df[(plot_df['Type'] == 1) & (plot_df['Outcome'] == 'Successful')]
-                                if not p_passes.empty:
-                                    dx = p_passes['endX'] - p_passes['x']
-                                    dy = p_passes['endY'] - p_passes['y']
-                                    angles = np.arctan2(dy, dx)
-                                    fig_polar = plt.figure(figsize=(5, 5))
-                                    fig_polar.set_facecolor('#0e1117')
-                                    ax_polar = fig_polar.add_subplot(111, polar=True)
-                                    ax_polar.set_facecolor('#0e1117')
-                                    ax_polar.hist(angles, bins=24, color='#00ffff', alpha=0.7, edgecolor='white')
-                                    ax_polar.set_theta_zero_location('E')
-                                    ax_polar.set_yticks([])
-                                    ax_polar.grid(color='#262730')
-                                    ax_polar.tick_params(axis='x', colors='white')
-                                    st.pyplot(fig_polar)
-                                    plt.close(fig_polar)
-                                else:
-                                    st.info("Not enough successful passes for sonar distribution in this timeframe.")
+                                st.info("No passes in this minute range.")
 
-                        if "Cumulative Threat Race (xT)" in modules:
-                            st.subheader("📈 Cumulative Threat Race (xT)")
-                            xt_race = match_df[match_df['Type'].isin([1, 3])].sort_values("Index").copy()
-                            xt_race = xt_race[(xt_race['Minute'] >= min_range[0]) & (xt_race['Minute'] <= min_range[1])]
-                            xt_race['xT_Pos'] = np.where(xt_race['xT_Added'] > 0, xt_race['xT_Added'], 0)
-                            xt_race['Cumulative xT'] = xt_race.groupby('Team')['xT_Pos'].cumsum()
-
-                            fig_xt = px.line(
-                                xt_race, x='Minute', y='Cumulative xT', color='Team',
-                                title='Expected Threat (xT) Accumulation', line_shape='hv',
-                                color_discrete_map={sel_team: '#ff4b4b'}, template="plotly_dark"
-                            )
-                            fig_xt.update_traces(selector=dict(name=opp_team), line_color='grey')
-                            st.plotly_chart(fig_xt, use_container_width=True)
-
-                        if "Player Impact Board (xT Created)" in modules:
-                            st.subheader(f"📊 Player Impact Board: {sel_team}")
-                            player_xt = plot_df[plot_df['Type'].isin([1, 3])].groupby('Player')['xT_Added'].sum().reset_index()
-                            player_xt = player_xt.sort_values('xT_Added', ascending=True)
-
-                            fig_bar = px.bar(
-                                player_xt, x='xT_Added', y='Player', orientation='h',
-                                title='Total Threat Created (Positive xT Added)', template="plotly_dark",
-                                color='xT_Added', color_continuous_scale=["#ff4b4b", "#00ff85"]
-                            )
-                            st.plotly_chart(fig_bar, use_container_width=True)
-
-                        if "Game Control (Possession)" in modules:
-                            st.subheader("🎮 Game Control: Possession % (Rolling 5-min)")
-                            full = match_df.copy()
-                            full = full[(full['Minute'] >= min_range[0]) & (full['Minute'] <= min_range[1])]
-
-                            if not full.empty:
-                                full['MinBin'] = (full['Minute'] // 5) * 5
-                                poss_data = full[full['Type'] == 1].groupby(['MinBin', 'Team']).size().reset_index(name='Passes')
-                                poss_pivot = poss_data.pivot(index='MinBin', columns='Team', values='Passes').fillna(0)
-                                poss_pivot['Total'] = poss_pivot.sum(axis=1)
-                                if sel_team in poss_pivot.columns:
-                                    poss_pivot['Possession'] = (poss_pivot[sel_team] / poss_pivot['Total']) * 100
-                                    fig_gc = px.area(
-                                        poss_pivot, x=poss_pivot.index, y='Possession',
-                                        labels={'MinBin': 'Minute', 'Possession': f'{sel_team} Possession %'},
-                                        template="plotly_dark", color_discrete_sequence=['#ff4b4b']
-                                    )
-                                    fig_gc.update_yaxes(range=[0, 100])
-                                    fig_gc.add_hline(y=50, line_dash="dash", line_color="white", opacity=0.5)
-                                    st.plotly_chart(fig_gc, use_container_width=True)
-
-                        if "Momentum Map" in modules:
-                            st.subheader("📈 Momentum Gap: Home vs Away")
-                            mom_base = match_df.sort_values("Index").copy()
-                            mom_base = mom_base[(mom_base['Minute'] >= min_range[0]) & (mom_base['Minute'] <= min_range[1])]
-
-                            if not mom_base.empty:
-                                mom_base['FinalThirdEntry'] = np.where(
-                                    (mom_base['Type'] == 1) & (mom_base['Outcome'] == 'Successful') & (mom_base['endX'] > 66.6),
-                                    1, 0
-                                ).astype(int)
-                                mom_base['CumulativeThreat'] = mom_base.groupby('Team')['FinalThirdEntry'].cumsum()
-                                fig_mom = px.line(
-                                    mom_base, x='Index', y='CumulativeThreat', color='Team',
-                                    labels={'Index': 'Match Progression', 'CumulativeThreat': 'Attacking Pressure'},
-                                    color_discrete_map={sel_team: '#ff4b4b'}, template="plotly_dark"
-                                )
-                                fig_mom.update_traces(selector=dict(name=opp_team), line_color='grey')
-                                fig_mom.update_layout(paper_bgcolor='#0e1117', plot_bgcolor='#0e1117', legend_title_text='')
-                                st.plotly_chart(fig_mom, use_container_width=True)
-
-                        if "The Pulse (Shot Race)" in modules:
-                            st.subheader("📈 The Pulse: Shot Accumulation Race")
-                            shot_race = match_df[match_df['Type'].isin([13, 14, 15, 16])].sort_values("Index").copy()
-                            shot_race = shot_race[(shot_race['Minute'] >= min_range[0]) & (shot_race['Minute'] <= min_range[1])]
-
-                            if not shot_race.empty:
-                                shot_race['Count'] = 1
-                                shot_race['Cumulative Shots'] = shot_race.groupby('Team')['Count'].cumsum()
-                                fig_pulse = px.line(
-                                    shot_race, x='Minute', y='Cumulative Shots', color='Team',
-                                    title='Shot Race', labels={'Minute': 'Match Minute', 'Cumulative Shots': 'Total Shots Taken'},
-                                    line_shape='hv', color_discrete_map={sel_team: '#ff4b4b'}, template="plotly_dark"
-                                )
-                                fig_pulse.update_traces(selector=dict(name=opp_team), line_color='grey')
-                                fig_pulse.update_layout(paper_bgcolor='#0e1117', plot_bgcolor='#0e1117')
-                                st.plotly_chart(fig_pulse, use_container_width=True)
+                        # --- Out of Possession ---
+                        if "Defensive Actions Map" in modules:
+                            st.subheader("🔴 Defensive Actions Map")
+                            def_map = viz_df[viz_df['Type'].isin([4, 7, 8, 12])].copy()
+                            if not def_map.empty:
+                                def_map['Action'] = def_map['Type'].map({4: 'Foul', 7: 'Tackle', 8: 'Interception', 12: 'Clearance'})
+                                fig_dm = _make_plotly_pitch("Defensive Action Locations")
+                                for action, color, symbol in [
+                                    ('Tackle', '#00a3ff', 'diamond'),
+                                    ('Interception', '#ff9900', 'square'),
+                                    ('Clearance', '#d1d5db', 'triangle-up'),
+                                    ('Foul', '#ff4b4b', 'x')
+                                ]:
+                                    adf = def_map[def_map['Action'] == action]
+                                    if adf.empty:
+                                        continue
+                                    fig_dm.add_trace(go.Scatter(
+                                        x=adf['x'], y=adf['y'], mode='markers', name=action,
+                                        marker=dict(color=color, size=10, symbol=symbol, line=dict(color='white', width=1)),
+                                        customdata=np.column_stack([adf['Player'], adf['Minute'], adf['Outcome']]),
+                                        hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>Outcome: %{customdata[2]}<extra></extra>"
+                                    ))
+                                st.plotly_chart(fig_dm, use_container_width=True)
                             else:
-                                st.write("No shots recorded in this interval.")
+                                st.info("No defensive actions recorded in this range.")
 
-                        # --- PITCH MODULES ---
-                        non_pitch_modules = {
-                            "Game Control (Possession)", "Momentum Map", "The Pulse (Shot Race)",
-                            "Cumulative Threat Race (xT)", "Player Impact Board (xT Created)", "Pass Sonar (Radar)"
-                        }
-                        pitch_modules = [m for m in modules if m not in non_pitch_modules]
+                        if "Defensive Shield (Heatmap + Line)" in modules:
+                            st.subheader("🔴 Defensive Shield")
+                            def_heat = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
+                            if not def_heat.empty:
+                                fig_ds = _make_plotly_pitch("Defensive Density + Recovery Height")
+                                fig_ds.add_trace(go.Histogram2d(
+                                    x=def_heat['x'], y=def_heat['y'], nbinsx=20, nbinsy=14,
+                                    colorscale='Reds', opacity=0.7, showscale=True,
+                                    colorbar=dict(title='Def Actions')
+                                ))
+                                fig_ds.add_vline(x=avg_rec_height, line_dash='dash', line_color='#ffd700', line_width=3)
+                                st.plotly_chart(fig_ds, use_container_width=True)
+                            else:
+                                st.info("No defensive actions to render.")
 
-                        if pitch_modules:
-                            st.markdown(f"<h3 style='text-align: center; color: white;'>{attack_label}</h3>", unsafe_allow_html=True)
-                            fig, ax = plt.subplots(figsize=(10, 7))
-                            fig.set_facecolor('#0e1117')
-                            ax.set_facecolor('#0e1117')
-                            pitch = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='white')
-                            pitch.draw(ax=ax)
+                        # --- Attacking Transition ---
+                        if "Progression Trajectory Lines" in modules:
+                            st.subheader("⚡ Progression Trajectory Lines")
+                            ball_wins = plot_df[
+                                (plot_df['Type'].isin([7, 8, 12])) &
+                                ((plot_df['Outcome'] == 'Successful') | (plot_df['Type'].isin([8, 12])))
+                            ].sort_values('Index')
 
-                            # --- Set Pieces ---
-                            if "Free Kick Targeting" in pitch_modules:
-                                fks = viz_df[(viz_df['Type'] == 1) & (viz_df['isFreeKick'])]
-                                fk_shots = viz_df[(viz_df['Type'].isin([13, 14, 15, 16])) & (viz_df['isFkShot'])]
+                            fig_ptl = _make_plotly_pitch("First 3-4 Actions After Ball Wins")
+                            palette = ['#00ff85', '#36d6e7', '#ffd700', '#ff7f50']
+                            seq_count = 0
+                            for _, win in ball_wins.head(24).iterrows():
+                                seq = match_df[
+                                    (match_df['Index'] > win['Index']) &
+                                    (match_df['Index'] <= win['Index'] + 35) &
+                                    (match_df['Team'] == sel_team) &
+                                    (match_df['Type'].isin([1, 3]))
+                                ].sort_values('Index').head(4)
+                                if seq.empty:
+                                    continue
+                                color = palette[seq_count % len(palette)]
+                                seq_count += 1
+                                xs, ys = [], []
+                                for _, r in seq.iterrows():
+                                    xs.extend([r['x'], r['endX'], None])
+                                    ys.extend([r['y'], r['endY'], None])
+                                fig_ptl.add_trace(go.Scatter(
+                                    x=xs, y=ys, mode='lines',
+                                    line=dict(color=color, width=3),
+                                    name='Transition Shape' if seq_count == 1 else 'Transition Shape',
+                                    showlegend=(seq_count == 1),
+                                    hoverinfo='skip'
+                                ))
+                                fig_ptl.add_trace(go.Scatter(
+                                    x=seq['endX'], y=seq['endY'], mode='markers',
+                                    marker=dict(color=color, size=8, line=dict(color='white', width=1)),
+                                    showlegend=False,
+                                    customdata=np.column_stack([seq['Player'], seq['Minute']]),
+                                    hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<extra></extra>"
+                                ))
 
-                                if not fks.empty or not fk_shots.empty:
-                                    if not fks.empty:
-                                        goal_fks, reg_fks = _check_sp_goal(fks, sel_team, match_df)
+                            if seq_count > 0:
+                                st.plotly_chart(fig_ptl, use_container_width=True)
+                            else:
+                                st.info("No ball-win transition sequences available in this range.")
 
-                                        if not reg_fks.empty:
-                                            succ_fk = reg_fks[reg_fks['Outcome'] == 'Successful']
-                                            fail_fk = reg_fks[reg_fks['Outcome'] == 'Unsuccessful']
+                        if "Time-to-Shot Scatter Plot" in modules:
+                            st.subheader("⚡ Time-to-Shot Scatter Plot")
+                            shots = plot_df[(plot_df['Type'].isin([13, 14, 15, 16])) & (plot_df['Outcome'] != 'Own Goal')].sort_values('Index')
+                            rows = []
+                            for _, shot in shots.iterrows():
+                                prior_opp = match_df[(match_df['Index'] < shot['Index']) & (match_df['Team'] != sel_team)].sort_values('Index').tail(1)
+                                start_idx = int(prior_opp.iloc[0]['Index'] + 1) if not prior_opp.empty else int(shot['Index'])
+                                chain = match_df[
+                                    (match_df['Index'] >= start_idx) &
+                                    (match_df['Index'] <= shot['Index']) &
+                                    (match_df['Team'] == sel_team)
+                                ].sort_values('Index')
+                                if chain.empty:
+                                    continue
+                                first_evt = chain.iloc[0]
+                                duration = float(shot['Minute'] - first_evt['Minute'])
+                                if duration <= 0:
+                                    duration = max(0.1, (shot['Index'] - first_evt['Index']) / 15)
+                                rows.append({
+                                    'Duration': duration,
+                                    'xG': float(shot['xG']),
+                                    'Actions': int(len(chain[chain['Type'].isin([1, 3])])),
+                                    'Shooter': shot['Player'],
+                                    'Minute': int(shot['Minute']),
+                                    'Result': 'Goal' if shot['Type'] == 16 else 'No Goal'
+                                })
 
-                                            if not succ_fk.empty:
-                                                pitch.arrows(succ_fk['x'].values, succ_fk['y'].values, succ_fk['endX'].values, succ_fk['endY'].values,
-                                                             width=2, headwidth=4, color='#00ffff', alpha=0.8, ax=ax, label=f'Succ. FK Pass ({len(succ_fk)})')
-                                                pitch.scatter(succ_fk['x'].values, succ_fk['y'].values, s=40, color='#00ffff', edgecolors='white', ax=ax)
-
-                                            if not fail_fk.empty:
-                                                pitch.arrows(fail_fk['x'].values, fail_fk['y'].values, fail_fk['endX'].values, fail_fk['endY'].values,
-                                                             width=2, headwidth=4, color='#ff4b4b', alpha=0.5, ax=ax, label=f'Failed FK Pass ({len(fail_fk)})')
-                                                pitch.scatter(fail_fk['x'].values, fail_fk['y'].values, s=40, color='#ff4b4b', edgecolors='white', ax=ax)
-
-                                        if not goal_fks.empty:
-                                            pitch.arrows(goal_fks['x'].values, goal_fks['y'].values, goal_fks['endX'].values, goal_fks['endY'].values,
-                                                         width=3, headwidth=5, color='#00ff85', alpha=1.0, ax=ax, label=f'Goal-Creating FK ({len(goal_fks)})', zorder=5)
-                                            pitch.scatter(goal_fks['endX'].values, goal_fks['endY'].values, s=250, marker='*', color='#00ff85', edgecolors='black', ax=ax, zorder=6)
-
-                                    if not fk_shots.empty:
-                                        fk_goals = fk_shots[(fk_shots['Type'] == 16) & (fk_shots['Outcome'] != 'Own Goal')]
-                                        fk_misses = fk_shots[~((fk_shots['Type'] == 16) & (fk_shots['Outcome'] != 'Own Goal'))]
-
-                                        if not fk_misses.empty:
-                                            pitch.scatter(fk_misses['x'].values, fk_misses['y'].values, s=200, marker='X', color='#ffd700', edgecolors='black', ax=ax, label=f'Direct FK Miss ({len(fk_misses)})', zorder=4)
-                                        if not fk_goals.empty:
-                                            pitch.scatter(fk_goals['x'].values, fk_goals['y'].values, s=400, marker='*', color='#00ff85', edgecolors='black', ax=ax, label=f'Direct FK Goal ({len(fk_goals)})', zorder=6)
-
-                                    ax.legend(facecolor='#262730', labelcolor='white', loc='upper right', bbox_to_anchor=(1, 1.15), ncol=2, fontsize=8)
-                                else:
-                                    pitch.annotate("No Free Kicks recorded in this range", xy=(50, 50), c='white', ha='center', va='center', size=12, ax=ax)
-
-                            if "Set Piece Targeting (Corners)" in pitch_modules:
-                                corners = viz_df[(viz_df['Type'] == 1) & (viz_df['isCorner'])]
-                                if not corners.empty:
-                                    goal_crn, reg_crn = _check_sp_goal(corners, sel_team, match_df)
-
-                                    if not reg_crn.empty:
-                                        succ_crn = reg_crn[reg_crn['Outcome'] == 'Successful']
-                                        fail_crn = reg_crn[reg_crn['Outcome'] == 'Unsuccessful']
-
-                                        if not succ_crn.empty:
-                                            pitch.arrows(succ_crn['x'].values, succ_crn['y'].values, succ_crn['endX'].values, succ_crn['endY'].values,
-                                                         width=2, headwidth=4, color='#00ffff', alpha=0.6, ax=ax, label=f'Succ. Corner ({len(succ_crn)})')
-                                        if not fail_crn.empty:
-                                            pitch.arrows(fail_crn['x'].values, fail_crn['y'].values, fail_crn['endX'].values, fail_crn['endY'].values,
-                                                         width=2, headwidth=4, color='#ff4b4b', alpha=0.5, ax=ax, label=f'Failed Corner ({len(fail_crn)})')
-
-                                    if not goal_crn.empty:
-                                        pitch.arrows(goal_crn['x'].values, goal_crn['y'].values, goal_crn['endX'].values, goal_crn['endY'].values,
-                                                     width=3, headwidth=5, color='#00ff85', alpha=1.0, ax=ax, label=f'Goal-Creating Corner ({len(goal_crn)})', zorder=5)
-                                        pitch.scatter(goal_crn['endX'].values, goal_crn['endY'].values, s=250, marker='*', color='#00ff85', edgecolors='black', ax=ax, zorder=6)
-
-                                    ax.legend(facecolor='#262730', labelcolor='white', loc='upper right', bbox_to_anchor=(1, 1.15), ncol=2, fontsize=8)
-                                else:
-                                    pitch.annotate("No Corners recorded in this range", xy=(50, 50), c='white', ha='center', va='center', size=12, ax=ax)
-
-                            # --- xT Modules ---
-                            if "High-Value Actions (xT Map)" in pitch_modules:
-                                high_xt = viz_df[(viz_df['Type'].isin([1, 3])) & (viz_df['Outcome'] == 'Successful') & (viz_df['xT_Added'] > 0.015)]
-
-                                if not high_xt.empty:
-                                    high_passes = high_xt[high_xt['Type'] == 1]
-                                    if not high_passes.empty:
-                                        pitch.arrows(high_passes['x'].values, high_passes['y'].values, high_passes['endX'].values, high_passes['endY'].values,
-                                                     width=3, headwidth=5, color='#00ff85', alpha=0.9, ax=ax, label='High Value Pass (>0.015 xT)')
-                                        pitch.scatter(high_passes['x'].values, high_passes['y'].values, s=50, color='#00ff85', edgecolors='white', ax=ax)
-
-                                    high_dribbles = high_xt[high_xt['Type'] == 3]
-                                    if not high_dribbles.empty:
-                                        pitch.lines(high_dribbles['x'].values, high_dribbles['y'].values, high_dribbles['endX'].values, high_dribbles['endY'].values,
-                                                    lw=3, linestyle='dashed', color='#00ffff', alpha=0.9, ax=ax, label='High Value Carry')
-                                        pitch.scatter(high_dribbles['x'].values, high_dribbles['y'].values, s=80, marker='d', color='#00ffff', edgecolors='white', ax=ax)
-
-                                    ax.legend(facecolor='#262730', labelcolor='white', loc='upper left')
-                                else:
-                                    pitch.annotate("No actions exceeded +0.015 xT in this range", xy=(50, 50), c='white', ha='center', va='center', size=12, ax=ax)
-
-                            if "Expected Threat (xT) Grid" in pitch_modules:
-                                xt_acts = viz_df[(viz_df['Type'].isin([1, 3])) & (viz_df['Outcome'] == 'Successful') & (viz_df['xT_Added'] > 0)]
-
-                                if not xt_acts.empty:
-                                    bin_statistic = pitch.bin_statistic(xt_acts['x'].values, xt_acts['y'].values, values=xt_acts['xT_Added'].values, statistic='sum', bins=(12, 8))
-                                    pitch.heatmap(bin_statistic, ax=ax, cmap='magma', alpha=0.7, edgecolors='#262730', lw=1, zorder=0)
-
-                                    stat = bin_statistic['statistic']
-                                    cx = bin_statistic['cx']
-                                    cy = bin_statistic['cy']
-
-                                    for row_i in range(stat.shape[0]):
-                                        for col_j in range(stat.shape[1]):
-                                            val = stat[row_i, col_j]
-                                            if val > 0.001:
-                                                ax.text(cx[row_i, col_j], cy[row_i, col_j], f'{val:.3f}', color='white',
-                                                        ha='center', va='center', fontsize=9, fontweight='bold', zorder=1)
-                                else:
-                                    pitch.annotate("No positive xT actions recorded", xy=(50, 50), c='white', ha='center', va='center', size=15, ax=ax)
-
-                            # --- Offensive Modules ---
-                            if "Actions Leading to Shots" in pitch_modules:
-                                sca_filter = st.selectbox(
-                                    "Filter Shot Outcome:",
-                                    ["All Attempts", "Goals Only", "Saved Only", "Blocked Only", "Missed Only"],
-                                    key=f"sca_filter_{manager}"
+                            tts_df = pd.DataFrame(rows)
+                            if not tts_df.empty:
+                                fig_tts = px.scatter(
+                                    tts_df, x='Duration', y='xG', size='Actions', color='Result',
+                                    color_discrete_map={'Goal': '#00ff85', 'No Goal': '#ff4b4b'},
+                                    hover_data=['Shooter', 'Minute', 'Actions'],
+                                    template='plotly_dark',
+                                    title='Possession Duration vs Shot Quality'
                                 )
-                                shots_df = viz_df[viz_df['Type'].isin([13, 14, 15, 16])]
-
-                                if sca_filter == "Goals Only":
-                                    shots_df = shots_df[(shots_df['Type'] == 16) & (shots_df['Outcome'] != 'Own Goal')]
-                                elif sca_filter == "Saved Only":
-                                    shots_df = shots_df[(shots_df['Type'] == 15) & (~shots_df['isBlocked'])]
-                                elif sca_filter == "Blocked Only":
-                                    shots_df = shots_df[shots_df['isBlocked']]
-                                elif sca_filter == "Missed Only":
-                                    shots_df = shots_df[~((shots_df['Type'] == 16) & (shots_df['Outcome'] != 'Own Goal')) & (~shots_df['isBlocked']) & (shots_df['Type'] != 15)]
-
-                                for _, shot in shots_df.iterrows():
-                                    shot_idx = shot['Index']
-                                    shot_type = shot['Type']
-
-                                    if shot_type == 16 and shot['Outcome'] != 'Own Goal':
-                                        color, marker, size = '#00ff85', '*', 400
-                                    elif shot['isBlocked']:
-                                        color, marker, size = '#aaaaaa', 'X', 200
-                                    elif shot_type == 15:
-                                        color, marker, size = '#ffd700', 'o', 200
-                                    else:
-                                        color, marker, size = '#ff4b4b', 'x', 200
-
-                                    pitch.scatter(shot.x, shot.y, s=size, marker=marker, c=color, edgecolors='white', ax=ax, zorder=4)
-
-                                    recent_events = viz_df[(viz_df['Index'] < shot_idx) & (viz_df['Index'] >= shot_idx - 10)]
-                                    recent_passes = recent_events[(recent_events['Type'] == 1) & (recent_events['Outcome'] == 'Successful')]
-
-                                    if not recent_passes.empty:
-                                        last_pass = recent_passes.iloc[-1]
-                                        pitch.arrows(last_pass.x, last_pass.y, shot.x, shot.y,
-                                                     width=2, headwidth=5, color=color, alpha=0.5, ax=ax, zorder=3)
-
-                                legend_elements = [
-                                    mlines.Line2D([0], [0], marker='*', color='w', label='Goal', markerfacecolor='#00ff85', markersize=15, linestyle='None'),
-                                    mlines.Line2D([0], [0], marker='o', color='w', label='Saved', markerfacecolor='#ffd700', markersize=10, linestyle='None'),
-                                    mlines.Line2D([0], [0], marker='X', color='w', label='Blocked', markerfacecolor='#aaaaaa', markersize=10, linestyle='None'),
-                                    mlines.Line2D([0], [0], marker='x', color='w', label='Missed', markerfacecolor='#ff4b4b', markersize=10, linestyle='None'),
-                                    mlines.Line2D([0], [0], color='w', lw=2, alpha=0.5, label='Creation Vector')
-                                ]
-                                ax.legend(handles=legend_elements, facecolor='#262730', labelcolor='white', loc='upper left')
-
-                            if "Counter Attacks (Rapid Transitions)" in pitch_modules:
-                                fb_indices = plot_df[(plot_df['Type'].isin([13, 14, 15, 16])) & (plot_df['isFastBreak'])].index
-                                fb_viz = viz_df.loc[fb_indices]
-
-                                fb_goals = pd.DataFrame()
-                                fb_shots = pd.DataFrame()
-                                if not fb_viz.empty:
-                                    fb_goals = fb_viz[(fb_viz['Type'] == 16) & (fb_viz['Outcome'] != 'Own Goal')]
-                                    fb_shots = fb_viz[~((fb_viz['Type'] == 16) & (fb_viz['Outcome'] != 'Own Goal'))]
-
-                                buildup_passes = pd.DataFrame()
-                                if not fb_viz.empty:
-                                    blist = []
-                                    for _, row in fb_viz.iterrows():
-                                        ev_idx = row['Index']
-                                        seq = match_df[
-                                            (match_df['Index'] >= ev_idx - 50) & (match_df['Index'] < ev_idx) &
-                                            (match_df['Team'] == sel_team) & (match_df['Type'] == 1) &
-                                            (match_df['Outcome'] == 'Successful')
-                                        ]
-                                        blist.append(seq)
-                                    if blist:
-                                        buildup_passes = pd.concat(blist).drop_duplicates()
-
-                                trans_indices = plot_df[
-                                    (plot_df['Type'] == 1) & (plot_df['Outcome'] == 'Successful') &
-                                    (plot_df['x'] < 40) & (plot_df['endX'] > 70)
-                                ].index
-                                trans_viz = viz_df.loc[trans_indices]
-
-                                if not trans_viz.empty:
-                                    pitch.arrows(trans_viz['x'].values, trans_viz['y'].values, trans_viz['endX'].values, trans_viz['endY'].values,
-                                                 width=2, color='#ffd700', alpha=0.5, ax=ax, label=f'Direct Counter Pass: {len(trans_viz)}')
-                                if not buildup_passes.empty:
-                                    pitch.arrows(buildup_passes['x'].values, buildup_passes['y'].values, buildup_passes['endX'].values, buildup_passes['endY'].values,
-                                                 width=3, color='#00ffff', alpha=0.8, ax=ax, label=f'Fast Break Sequence: {len(buildup_passes)}')
-                                if not fb_shots.empty:
-                                    pitch.scatter(fb_shots['x'].values, fb_shots['y'].values, s=400, marker='*', c='#00ffff', edgecolors='white', ax=ax, label=f'Fast Break Shot: {len(fb_shots)}')
-                                if not fb_goals.empty:
-                                    pitch.scatter(fb_goals['x'].values, fb_goals['y'].values, s=600, marker='*', c='#00ff85', edgecolors='white', linewidth=1.5, ax=ax, label=f'Fast Break Goal: {len(fb_goals)}')
-                                if not trans_viz.empty or not fb_viz.empty or not buildup_passes.empty:
-                                    ax.legend(facecolor='#262730', labelcolor='white')
-
-                            if "Creator Map (Shot Assists)" in pitch_modules:
-                                shots_for_assists = viz_df[viz_df['Type'].isin([13, 14, 15, 16])]
-                                assists = []
-                                key_passes = []
-
-                                for _, shot in shots_for_assists.iterrows():
-                                    shot_idx = shot['Index']
-                                    prev_events = viz_df[(viz_df['Index'] < shot_idx) & (viz_df['Index'] >= shot_idx - 5)]
-                                    prev_passes = prev_events[(prev_events['Type'] == 1) & (prev_events['Outcome'] == 'Successful')]
-
-                                    if not prev_passes.empty:
-                                        key_pass = prev_passes.iloc[-1]
-                                        if shot['Type'] == 16 and shot['Outcome'] != 'Own Goal':
-                                            assists.append(key_pass)
-                                        else:
-                                            key_passes.append(key_pass)
-
-                                if key_passes:
-                                    kp_df = pd.DataFrame(key_passes)
-                                    pitch.arrows(kp_df['x'].values, kp_df['y'].values, kp_df['endX'].values, kp_df['endY'].values,
-                                                 width=2, headwidth=4, color='#00ffff', alpha=0.7, ax=ax, label=f'Key Pass ({len(kp_df)})')
-                                    pitch.scatter(kp_df['x'].values, kp_df['y'].values, s=60, color='#00ffff', edgecolors='white', ax=ax, zorder=3)
-
-                                if assists:
-                                    ast_df = pd.DataFrame(assists)
-                                    pitch.arrows(ast_df['x'].values, ast_df['y'].values, ast_df['endX'].values, ast_df['endY'].values,
-                                                 width=3, headwidth=5, color='#ffd700', alpha=0.9, ax=ax, label=f'Assist ({len(ast_df)})')
-                                    pitch.scatter(ast_df['x'].values, ast_df['y'].values, s=200, marker='*', color='#ffd700', edgecolors='black', ax=ax, zorder=4)
-
-                                if key_passes or assists:
-                                    ax.legend(facecolor='#262730', labelcolor='white')
-                                else:
-                                    pitch.annotate("No Shot Assists Recorded", xy=(50, 50), c='white', ha='center', va='center', size=15, ax=ax)
-
-                            if "Attacking Zones (5 Lanes)" in pitch_modules:
-                                f3_acts = plot_df[(plot_df['x'] > 66.6) & (plot_df['Type'] == 1) & (plot_df['Outcome'] == 'Successful')]
-                                total_f3_acts = len(f3_acts)
-                                if total_f3_acts > 0:
-                                    lane_defs = [
-                                        ("Right Flank", 0, 20),
-                                        ("Right Half", 20, 37),
-                                        ("Center", 37, 63),
-                                        ("Left Half", 63, 80),
-                                        ("Left Flank", 80, 100),
-                                    ]
-                                    for label, y_lo, y_hi in lane_defs:
-                                        count = len(f3_acts[(f3_acts['y'] > y_lo) & (f3_acts['y'] <= y_hi)]) if y_lo > 0 else len(f3_acts[f3_acts['y'] <= y_hi])
-                                        pct = (count / total_f3_acts) * 100
-                                        height = y_hi - y_lo
-                                        rect = mpatches.Rectangle((66.6, y_lo), 33.4, height, alpha=min(0.9, max(0.2, pct / 40)), color='#ff4b4b', ec='white')
-                                        ax.add_patch(rect)
-                                        ax.text(66.6 + 16.7, y_lo + (height / 2), f"{label}\n{pct:.1f}%", color='white', ha='center', va='center', fontweight='bold', fontsize=9)
-
-                            if "Zone Invasions" in pitch_modules:
-                                zi_passes = viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful')]
-                                zi_dribbles_won = viz_df[(viz_df['Type'] == 3) & (viz_df['Outcome'] == 'Successful')]
-
-                                f3_pass = zi_passes[(zi_passes['endX'] > 66) & (zi_passes['endX'] <= 83)]
-                                box_pass = zi_passes[zi_passes['endX'] > 83]
-                                drib_won = zi_dribbles_won[zi_dribbles_won['x'] > 66]
-
-                                if not f3_pass.empty:
-                                    pitch.arrows(f3_pass['x'].values, f3_pass['y'].values, f3_pass['endX'].values, f3_pass['endY'].values, width=3, color='white', alpha=0.6, ax=ax, label='Into F3')
-                                if not box_pass.empty:
-                                    pitch.arrows(box_pass['x'].values, box_pass['y'].values, box_pass['endX'].values, box_pass['endY'].values, width=3, color='#ffd700', alpha=0.9, ax=ax, label='Into Box')
-                                if not drib_won.empty:
-                                    pitch.scatter(drib_won['x'].values, drib_won['y'].values, s=150, marker='d', c='#00ffff', edgecolors='white', ax=ax, label='Succ. Dribble')
-                                ax.legend(facecolor='#262730', labelcolor='white')
-
-                            if "The Breakout (Progressive Carries)" in pitch_modules:
-                                prog_indices = plot_df[plot_df['endX'] > plot_df['x'] + 10].index
-                                carries_viz = viz_df.loc[prog_indices]
-                                if not carries_viz.empty:
-                                    pitch.lines(carries_viz['x'].values, carries_viz['y'].values, carries_viz['endX'].values, carries_viz['endY'].values,
-                                                lw=3, linestyle='dashed', color='#00ffff', alpha=0.8, ax=ax, label='Prog. Carry (>10m)')
-                                    pitch.scatter(carries_viz['x'].values, carries_viz['y'].values, s=50, c='#00ffff', ax=ax)
-                                    ax.legend(facecolor='#262730', labelcolor='white', title=f"Count: {len(carries_viz)}")
-
-                            if "The Air Raid (Crossing Zones)" in pitch_modules:
-                                crosses = viz_df[(viz_df['Type'] == 1) & (viz_df['isCross'])]
-                                if not crosses.empty:
-                                    succ = crosses[crosses['Outcome'] == 'Successful']
-                                    fail = crosses[crosses['Outcome'] == 'Unsuccessful']
-                                    if not succ.empty:
-                                        pitch.arrows(succ['x'].values, succ['y'].values, succ['endX'].values, succ['endY'].values, width=2, color='#00ff85', label='Succ. Cross', ax=ax)
-                                    if not fail.empty:
-                                        pitch.arrows(fail['x'].values, fail['y'].values, fail['endX'].values, fail['endY'].values, width=2, color='#ff4b4b', alpha=0.5, label='Failed Cross', ax=ax)
-                                    ax.legend(facecolor='#262730', labelcolor='white')
-
-                            if "Transition Passing Breakdown" in pitch_modules:
-                                trans_passes = viz_df[
-                                    (viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful') &
-                                    ((viz_df['isFastBreak']) | ((viz_df['x'] < 66.6) & (viz_df['endX'] - viz_df['x'] >= 20)))
-                                ]
-                                tp_shots = viz_df[viz_df['Type'].isin([13, 14, 15, 16])]
-                                tp_goals = tp_shots[(tp_shots['Type'] == 16) & (tp_shots['Outcome'] != 'Own Goal')]
-                                tp_misses = tp_shots[~((tp_shots['Type'] == 16) & (tp_shots['Outcome'] != 'Own Goal'))]
-
-                                if not trans_passes.empty:
-                                    pitch.arrows(trans_passes['x'].values, trans_passes['y'].values, trans_passes['endX'].values, trans_passes['endY'].values,
-                                                 width=2, headwidth=4, color='#ffd700', alpha=0.8, ax=ax, label='Transition Passes', zorder=2)
-                                    bbox_props = dict(boxstyle="round,pad=0.5", fc="#1e1e1e", ec="white", lw=1)
-                                    ax.text(80, 5, f"Total Transition Passes: {len(trans_passes)}", color='white', ha='center', va='center', fontweight='bold', fontsize=10, bbox=bbox_props, zorder=5)
-
-                                if not tp_misses.empty:
-                                    pitch.scatter(tp_misses['x'].values, tp_misses['y'].values, s=150, marker='X', color='#ff4b4b', ax=ax, label='Shot (No Goal)', zorder=4)
-                                if not tp_goals.empty:
-                                    pitch.scatter(tp_goals['x'].values, tp_goals['y'].values, s=300, marker='*', color='#00ff85', edgecolors='white', ax=ax, label='Goal', zorder=5)
-                                ax.legend(facecolor='#262730', labelcolor='white', loc='lower center', bbox_to_anchor=(0.5, -0.15), ncol=3)
-
-                            # --- Average Positions ---
-                            if "Average Offensive Positions" in pitch_modules:
-                                off_events = viz_df[viz_df['Type'].isin([1, 3])]
-                                if not off_events.empty:
-                                    off_avg = off_events.groupby('Player')[['x', 'y']].mean()
-                                    pitch.scatter(off_avg['x'].values, off_avg['y'].values, s=150, c='#00ffff', edgecolors='white', ax=ax, zorder=3, label='Avg Offensive Position')
-                                    for player, row in off_avg.iterrows():
-                                        pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y + 3), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
-                                    ax.legend(facecolor='#262730', labelcolor='white')
-
-                            if "Average Defensive Positions" in pitch_modules:
-                                def_events = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
-                                def_avg = def_events.groupby('Player')[['x', 'y']].mean() if not def_events.empty else pd.DataFrame(columns=['x', 'y'])
-                                def_avg = _fix_gk_positions(def_avg, plot_df)
-                                if not def_avg.empty:
-                                    pitch.scatter(def_avg['x'].values, def_avg['y'].values, s=150, c='#ff4b4b', edgecolors='white', marker='s', ax=ax, zorder=3, label='Avg Defensive Position')
-                                    for player, row in def_avg.iterrows():
-                                        pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y + 3), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
-                                    ax.legend(facecolor='#262730', labelcolor='white')
-
-                            # --- Matchup Modules (define opp_viz once for both) ---
-                            needs_opp_viz = ("Matchup: Offense vs Opp. Defense" in pitch_modules or "Matchup: Defense vs Opp. Offense" in pitch_modules)
-                            opp_viz = opp_stats.copy() if needs_opp_viz else pd.DataFrame()
-
-                            if "Matchup: Offense vs Opp. Defense" in pitch_modules:
-                                off_events = viz_df[viz_df['Type'].isin([1, 3])]
-                                opp_def_events = opp_viz[opp_viz['Type'].isin([4, 7, 8, 12])] if not opp_viz.empty else pd.DataFrame()
-
-                                if not off_events.empty:
-                                    off_avg = off_events.groupby('Player')[['x', 'y']].mean()
-                                    pitch.scatter(off_avg['x'].values, off_avg['y'].values, s=150, c='#00ffff', edgecolors='white', ax=ax, zorder=3, label=f'{sel_team} (Off)')
-                                    for player, row in off_avg.iterrows():
-                                        pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y + 3), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
-
-                                if not opp_def_events.empty:
-                                    def_avg = opp_def_events.groupby('Player')[['x', 'y']].mean()
-                                else:
-                                    def_avg = pd.DataFrame(columns=['x', 'y'])
-                                if not opp_viz.empty:
-                                    def_avg = _fix_gk_positions(def_avg, opp_viz)
-                                if not def_avg.empty:
-                                    pitch.scatter(def_avg['x'].values, def_avg['y'].values, s=150, c='#ff4b4b', edgecolors='white', marker='s', ax=ax, zorder=3, label=f'{opp_team} (Def)')
-                                    for player, row in def_avg.iterrows():
-                                        pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y + 3), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
-                                ax.legend(facecolor='#262730', labelcolor='white')
-
-                            if "Matchup: Defense vs Opp. Offense" in pitch_modules:
-                                def_events = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
-                                opp_off_events = opp_viz[opp_viz['Type'].isin([1, 3])] if not opp_viz.empty else pd.DataFrame()
-
-                                if not def_events.empty:
-                                    def_avg = def_events.groupby('Player')[['x', 'y']].mean()
-                                else:
-                                    def_avg = pd.DataFrame(columns=['x', 'y'])
-                                def_avg = _fix_gk_positions(def_avg, plot_df)
-                                if not def_avg.empty:
-                                    pitch.scatter(def_avg['x'].values, def_avg['y'].values, s=150, c='#ff4b4b', edgecolors='white', marker='s', ax=ax, zorder=3, label=f'{sel_team} (Def)')
-                                    for player, row in def_avg.iterrows():
-                                        pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y + 3), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
-
-                                if not opp_off_events.empty:
-                                    off_avg = opp_off_events.groupby('Player')[['x', 'y']].mean()
-                                    pitch.scatter(off_avg['x'].values, off_avg['y'].values, s=150, c='#00ffff', edgecolors='white', ax=ax, zorder=3, label=f'{opp_team} (Off)')
-                                    for player, row in off_avg.iterrows():
-                                        pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y + 3), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
-                                ax.legend(facecolor='#262730', labelcolor='white')
-
-                            # --- Defensive Modules ---
-                            if "Defensive Shield (Heatmap + Line)" in pitch_modules:
-                                def_heat = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
-                                if not def_heat.empty:
-                                    pitch.kdeplot(def_heat['x'].values, def_heat['y'].values, ax=ax, cmap='viridis', fill=True, levels=100, alpha=0.6)
-
-                                if avg_rec_height > 0:
-                                    draw_x = avg_rec_height
-                                    pitch.lines(draw_x, 0, draw_x, 100, color='#ffd700', lw=3, linestyle='dashed', alpha=0.9, ax=ax, label=f'Avg Def Line ({avg_rec_height}m)')
-                                    ax.add_patch(mpatches.Rectangle((0, 0), draw_x, 100, alpha=0.1, color='#ffd700', ec=None))
-                                    ax.legend(facecolor='#262730', labelcolor='white')
-
-                            if "Duel Map (Tackles Won/Lost)" in pitch_modules:
-                                duels = viz_df[viz_df['Type'] == 7]
-                                if not duels.empty:
-                                    won = duels[duels['Outcome'] == 'Successful']
-                                    lost = duels[duels['Outcome'] == 'Unsuccessful']
-                                    if not won.empty:
-                                        pitch.scatter(won['x'].values, won['y'].values, s=200, marker='p', c='#00ff85', edgecolors='black', ax=ax, label='Tackle Won')
-                                    if not lost.empty:
-                                        pitch.scatter(lost['x'].values, lost['y'].values, s=200, marker='X', c='#ff4b4b', edgecolors='white', ax=ax, label='Tackle Lost')
-                                    ax.legend(facecolor='#262730', labelcolor='white')
-
-                            if "Impact Zone (Convex Hull)" in pitch_modules:
-                                def_pts = viz_df[viz_df['Type'].isin([4, 7, 8, 12])][['x', 'y']]
-                                if len(def_pts) >= 3:
-                                    hull = ConvexHull(def_pts[['x', 'y']].values)
-                                    hull_pts = def_pts[['x', 'y']].values[hull.vertices]
-                                    hull_pts = np.vstack((hull_pts, hull_pts[0]))
-                                    poly = mpatches.Polygon(hull_pts, closed=True, facecolor='#ff4b4b', alpha=0.3, edgecolor='white', lw=2)
-                                    ax.add_patch(poly)
-                                    pitch.scatter(def_pts['x'].values, def_pts['y'].values, s=50, c='#ff4b4b', ax=ax, alpha=0.6)
-
-                            if "Defensive Actions" in pitch_modules:
-                                def_act = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
-                                if not def_act.empty:
-                                    tackles_df = def_act[def_act['Type'] == 7]
-                                    interceptions_df = def_act[def_act['Type'] == 8]
-                                    fouls_df = def_act[def_act['Type'] == 4]
-                                    if not tackles_df.empty:
-                                        pitch.scatter(tackles_df['x'].values, tackles_df['y'].values, s=150, marker='d', c='#3399ff', edgecolors='white', ax=ax, label='Tackle')
-                                    if not interceptions_df.empty:
-                                        pitch.scatter(interceptions_df['x'].values, interceptions_df['y'].values, s=150, marker='s', c='#ff9900', edgecolors='black', ax=ax, label='Interception')
-                                    if not fouls_df.empty:
-                                        pitch.scatter(fouls_df['x'].values, fouls_df['y'].values, s=150, marker='X', c='#ff4b4b', ax=ax, label='Foul')
-                                    ax.legend(facecolor='#262730', labelcolor='white')
-
-                            if "Zonal Defensive Pressure Map" in pitch_modules:
-                                zd_events = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
-                                _draw_zonal_grid(pitch, ax, zd_events,
-                                                 x_bins=[0, 33.33, 66.67, 100],
-                                                 y_bins=[0, 21.1, 78.9, 100],
-                                                 cmap=plt.cm.Reds)
-
-                            if "Zonal Passing Control Map" in pitch_modules:
-                                zp_events = viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful')]
-                                _draw_zonal_grid(pitch, ax, zp_events,
-                                                 x_bins=[0, 33.33, 66.67, 100],
-                                                 y_bins=[0, 21.1, 78.9, 100],
-                                                 cmap=plt.cm.Blues)
-
-                            if "Defensive Penetration Conceded" in pitch_modules:
-                                opp_succ_passes = opp_stats[(opp_stats['Type'] == 1) & (opp_stats['Outcome'] == 'Successful')]
-                                box_passes = opp_succ_passes[
-                                    (opp_succ_passes['endX'] <= 17) & (opp_succ_passes['x'] > 17) &
-                                    (opp_succ_passes['endY'] >= 21.1) & (opp_succ_passes['endY'] <= 78.9)
-                                ]
-                                z14_passes = opp_succ_passes[
-                                    (opp_succ_passes['endX'] > 17) & (opp_succ_passes['endX'] <= 35) &
-                                    (opp_succ_passes['x'] > 35) & (opp_succ_passes['endY'] >= 37) &
-                                    (opp_succ_passes['endY'] <= 63)
-                                ]
-
-                                ax.add_patch(mpatches.Rectangle((0, 21.1), 17, 57.8, alpha=0.15, color='#ff4b4b', ec=None, zorder=1))
-                                ax.add_patch(mpatches.Rectangle((17, 37), 18, 26, alpha=0.15, color='#ffd700', ec=None, zorder=1))
-
-                                def_acts_pen = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
-                                if not def_acts_pen.empty:
-                                    pitch.scatter(def_acts_pen['x'].values, def_acts_pen['y'].values, s=30, marker='s', color='#262730', edgecolors='white', alpha=0.6, ax=ax, zorder=2, label='Our Def. Actions')
-
-                                def _split_by_goal(pass_df, scoring_team):
-                                    fatal, safe = [], []
-                                    goal_evts = match_df[
-                                        (match_df['Type'] == 16) & (match_df['Team'] == scoring_team) &
-                                        (match_df['Outcome'] != 'Own Goal') & (match_df['Period'] < 5)
-                                    ]
-                                    fatal_indices = set()
-                                    for _, g in goal_evts.iterrows():
-                                        prior = pass_df[(pass_df['Index'] < g['Index']) & (pass_df['Index'] >= g['Index'] - 15)]
-                                        if not prior.empty:
-                                            fatal_indices.add(prior.iloc[-1]['Index'])
-                                    for _, p in pass_df.iterrows():
-                                        (fatal if p['Index'] in fatal_indices else safe).append(p)
-                                    return pd.DataFrame(fatal), pd.DataFrame(safe)
-
-                                fatal_box, safe_box = _split_by_goal(box_passes, opp_team)
-                                fatal_z14, safe_z14 = _split_by_goal(z14_passes, opp_team)
-
-                                if not safe_box.empty:
-                                    pitch.arrows(safe_box['x'].values, safe_box['y'].values, safe_box['endX'].values, safe_box['endY'].values,
-                                                 width=2, headwidth=4, color='#ff4b4b', alpha=0.6, ax=ax, label=f'Box Conceded ({len(safe_box)})', zorder=4)
-                                    pitch.scatter(safe_box['x'].values, safe_box['y'].values, s=40, color='#ff4b4b', edgecolors='white', ax=ax, zorder=4)
-                                if not fatal_box.empty:
-                                    pitch.arrows(fatal_box['x'].values, fatal_box['y'].values, fatal_box['endX'].values, fatal_box['endY'].values,
-                                                 width=3, headwidth=5, color='#00ff85', alpha=1.0, ax=ax, label=f'Fatal Box Pass ({len(fatal_box)})', zorder=5)
-                                    pitch.scatter(fatal_box['endX'].values, fatal_box['endY'].values, s=250, marker='*', color='#00ff85', edgecolors='black', ax=ax, zorder=6)
-                                if not safe_z14.empty:
-                                    pitch.arrows(safe_z14['x'].values, safe_z14['y'].values, safe_z14['endX'].values, safe_z14['endY'].values,
-                                                 width=2, headwidth=4, color='#ffd700', alpha=0.6, ax=ax, label=f'Pocket Conceded ({len(safe_z14)})', zorder=3)
-                                    pitch.scatter(safe_z14['x'].values, safe_z14['y'].values, s=40, color='#ffd700', edgecolors='black', ax=ax, zorder=3)
-                                if not fatal_z14.empty:
-                                    pitch.arrows(fatal_z14['x'].values, fatal_z14['y'].values, fatal_z14['endX'].values, fatal_z14['endY'].values,
-                                                 width=3, headwidth=5, color='#00ff85', alpha=1.0, ax=ax, label=f'Fatal Pocket Pass ({len(fatal_z14)})', zorder=5)
-                                    pitch.scatter(fatal_z14['endX'].values, fatal_z14['endY'].values, s=250, marker='*', color='#00ff85', edgecolors='black', ax=ax, zorder=6)
-
-                                if box_passes.empty and z14_passes.empty:
-                                    pitch.annotate("No Major Defensive Penetrations Conceded", xy=(50, 50), c='white', ha='center', va='center', size=12, ax=ax)
-                                else:
-                                    ax.legend(facecolor='#262730', labelcolor='white', loc='upper right', bbox_to_anchor=(1, 1.15), ncol=2, fontsize=8)
-
-                            if "Zones of Responsibility (Voronoi)" in pitch_modules:
-                                team_avg = viz_df.groupby('Player')[['x', 'y']].mean().reset_index()
-                                if len(team_avg) >= 4:
-                                    x_vals = team_avg['x'].values
-                                    y_vals = team_avg['y'].values
-                                    try:
-                                        team_vor, _ = pitch.voronoi(x_vals, y_vals, team_avg['Player'].values)
-                                        pitch.polygon(team_vor, ax=ax, fc='#ff4b4b', ec='white', lw=2, alpha=0.2, zorder=1)
-                                    except (ValueError, TypeError):
-                                        team_vor = pitch.voronoi(x_vals, y_vals)
-                                        pitch.polygon(team_vor, ax=ax, fc='#ff4b4b', ec='white', lw=2, alpha=0.2, zorder=1)
-                                    pitch.scatter(x_vals, y_vals, s=150, c='#ff4b4b', edgecolors='white', ax=ax, zorder=3)
-                                    for _, row in team_avg.iterrows():
-                                        pitch.annotate(row['Player'].split(" ")[-1], xy=(row.x, row.y + 2.5), c='white', ha='center', va='center', size=9, fontweight='bold', ax=ax, zorder=4)
-
-                            # --- Possession Modules ---
-                            if "The Architect (Build-Up Phase)" in pitch_modules:
-                                build_up_indices = plot_df[(plot_df['Type'] == 1) & (plot_df['x'] < 33)].index
-                                build_up_viz = viz_df.loc[build_up_indices]
-
-                                if not build_up_viz.empty:
-                                    norm_endX = plot_df.loc[build_up_indices, 'endX']
-                                    circ = build_up_viz[norm_endX < 33]
-                                    prog = build_up_viz[(norm_endX >= 33) & (norm_endX < 66)]
-                                    launch = build_up_viz[norm_endX >= 66]
-
-                                    if not circ.empty:
-                                        pitch.lines(circ['x'].values, circ['y'].values, circ['endX'].values, circ['endY'].values, color='white', alpha=0.1, lw=2, ax=ax, label=f'Circulation: {len(circ)}')
-                                    if not prog.empty:
-                                        pitch.lines(prog['x'].values, prog['y'].values, prog['endX'].values, prog['endY'].values, color='#00ffff', alpha=0.6, lw=3, ax=ax, label=f'Progression: {len(prog)}')
-                                        pitch.scatter(prog['endX'].values, prog['endY'].values, s=30, c='#00ffff', ax=ax)
-                                    if not launch.empty:
-                                        pitch.lines(launch['x'].values, launch['y'].values, launch['endX'].values, launch['endY'].values, color='#ff00ff', alpha=0.8, lw=3, ax=ax, label=f'Long Ball: {len(launch)}')
-                                        pitch.scatter(launch['endX'].values, launch['endY'].values, s=30, c='#ff00ff', ax=ax)
-                                    ax.legend(facecolor='#262730', labelcolor='white')
-
-                            if "Zone 14 & Half-Spaces" in pitch_modules:
-                                zones = {
-                                    "Zone 14": {"x": (65, 85), "y": (37, 63), "color": "#ffd700"},
-                                    "LHS": {"x": (65, 85), "y": (20, 37), "color": "#ff4b4b"},
-                                    "RHS": {"x": (65, 85), "y": (63, 80), "color": "#ff4b4b"}
-                                }
-                                legend_handles = []
-
-                                for zone_name, bounds in zones.items():
-                                    xmin, xmax = bounds["x"]
-                                    ymin, ymax = bounds["y"]
-                                    c = bounds["color"]
-
-                                    rect = mpatches.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, alpha=0.15, color=c, ec='white', lw=1.5, zorder=1)
-                                    ax.add_patch(rect)
-
-                                    zone_events = viz_df[
-                                        (viz_df['x'] >= xmin) & (viz_df['x'] <= xmax) &
-                                        (viz_df['y'] >= ymin) & (viz_df['y'] <= ymax)
-                                    ]
-
-                                    z_succ_passes = zone_events[(zone_events['Type'] == 1) & (zone_events['Outcome'] == 'Successful')]
-                                    z_succ_dribbles = zone_events[(zone_events['Type'] == 3) & (zone_events['Outcome'] == 'Successful')]
-                                    z_fail_passes = zone_events[(zone_events['Type'] == 1) & (zone_events['Outcome'] == 'Unsuccessful')]
-                                    z_fail_dribbles = zone_events[(zone_events['Type'] == 3) & (zone_events['Outcome'] == 'Unsuccessful')]
-
-                                    succ_count = len(z_succ_passes) + len(z_succ_dribbles)
-                                    loss_count = len(z_fail_passes) + len(z_fail_dribbles)
-
-                                    if not z_succ_passes.empty:
-                                        pitch.arrows(z_succ_passes['x'].values, z_succ_passes['y'].values, z_succ_passes['endX'].values, z_succ_passes['endY'].values,
-                                                     width=2, headwidth=4, color='white', alpha=0.8, ax=ax, zorder=3)
-                                    if not z_succ_dribbles.empty:
-                                        pitch.scatter(z_succ_dribbles['x'].values, z_succ_dribbles['y'].values, s=100, marker='d', color='#00ffff', edgecolors='white', ax=ax, zorder=4)
-                                    if not z_fail_passes.empty:
-                                        pitch.arrows(z_fail_passes['x'].values, z_fail_passes['y'].values, z_fail_passes['endX'].values, z_fail_passes['endY'].values,
-                                                     width=2, headwidth=4, color='#ff4b4b', alpha=0.4, ax=ax, zorder=2)
-                                    if not z_fail_dribbles.empty:
-                                        pitch.scatter(z_fail_dribbles['x'].values, z_fail_dribbles['y'].values, s=100, marker='x', color='#ff4b4b', ax=ax, zorder=4)
-
-                                    legend_handles.append(mpatches.Patch(color=c, alpha=0.5, label=f"{zone_name} | Succ: {succ_count} | Lost: {loss_count}"))
-
-                                legend_handles.extend([
-                                    mlines.Line2D([0], [0], color='white', lw=2, label='Succ Pass'),
-                                    mlines.Line2D([0], [0], marker='d', color='w', markerfacecolor='#00ffff', markersize=8, linestyle='None', label='Succ Dribble'),
-                                    mlines.Line2D([0], [0], color='#ff4b4b', alpha=0.4, lw=2, label='Failed Pass'),
-                                    mlines.Line2D([0], [0], marker='x', color='w', markeredgecolor='#ff4b4b', markersize=8, linestyle='None', label='Failed Dribble'),
-                                ])
-                                ax.legend(handles=legend_handles, facecolor='#262730', labelcolor='white', loc='upper left', bbox_to_anchor=(0, 1.15), ncol=3, fontsize=8)
-
-                            if "Passing Network (Structure)" in pitch_modules:
-                                net_df = viz_df.copy()
-                                avg_pos = net_df.groupby('Player')[['x', 'y']].mean()
-                                pass_counts = net_df.groupby('Player').size()
-                                net_df['NextPlayer'] = net_df['Player'].shift(-1)
-                                net_df['NextTeam'] = net_df['Team'].shift(-1)
-                                connections = net_df[(net_df['Type'] == 1) & (net_df['Outcome'] == 'Successful') & (net_df['NextTeam'] == sel_team)]
-                                if not connections.empty:
-                                    edges = connections.groupby(['Player', 'NextPlayer']).size().reset_index(name='count')
-                                    edges = edges[edges['count'] > 2]
-                                    for _, row in edges.iterrows():
-                                        p1, p2 = row['Player'], row['NextPlayer']
-                                        if p1 in avg_pos.index and p2 in avg_pos.index:
-                                            width = row['count'] * 0.5
-                                            pitch.lines(avg_pos.loc[p1].x, avg_pos.loc[p1].y, avg_pos.loc[p2].x, avg_pos.loc[p2].y, lw=width, color='#ff4b4b', alpha=0.6, ax=ax, zorder=1)
-                                    pitch.scatter(avg_pos.x, avg_pos.y, s=pass_counts * 5, color='#0e1117', edgecolors='white', linewidth=2, ax=ax, zorder=2)
-                                    for player, row in avg_pos.iterrows():
-                                        pitch.annotate(player.split(" ")[-1], xy=(row.x, row.y), c='white', va='center', ha='center', size=8, ax=ax, zorder=3)
-
-                            if "Pass Map" in pitch_modules:
-                                pm_passes = viz_df[viz_df['Type'] == 1]
-                                if not pm_passes.empty:
-                                    succ = pm_passes[pm_passes['Outcome'] == 'Successful']
-                                    fail = pm_passes[pm_passes['Outcome'] == 'Unsuccessful']
-                                    if not succ.empty:
-                                        pitch.arrows(succ['x'].values, succ['y'].values, succ['endX'].values, succ['endY'].values, width=2, color='#00ff85', alpha=0.3, ax=ax)
-                                    if not fail.empty:
-                                        pitch.arrows(fail['x'].values, fail['y'].values, fail['endX'].values, fail['endY'].values, width=2, color='#ff4b4b', alpha=0.3, ax=ax)
-
-                            if "Passing Heatmap" in pitch_modules:
-                                passes_heat = viz_df[viz_df['Type'] == 1]
-                                if not passes_heat.empty:
-                                    pitch.kdeplot(passes_heat['x'].values, passes_heat['y'].values, ax=ax, cmap='plasma', fill=True, levels=100, alpha=0.6)
-
-                            if "General Heatmap" in pitch_modules and not viz_df.empty:
-                                pitch.kdeplot(viz_df['x'].values, viz_df['y'].values, ax=ax, cmap='hot', fill=True, levels=100, alpha=0.6)
-
-                            # Switches of Play: >= 50 Opta units ≈ ~34m lateral distance
-                            if "Switches of Play (Long Diagonals)" in pitch_modules:
-                                sw_passes = viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful')]
-                                switches = sw_passes[abs(sw_passes['endY'] - sw_passes['y']) >= 50]
-
-                                if not switches.empty:
-                                    pitch.arrows(switches['x'].values, switches['y'].values, switches['endX'].values, switches['endY'].values,
-                                                 width=2, headwidth=4, color='#00529F', alpha=0.9, ax=ax, zorder=3)
-                                    pitch.scatter(switches['x'].values, switches['y'].values, s=30, color='white', edgecolors='black', ax=ax, zorder=4)
-
-                                    bbox_props = dict(boxstyle="round,pad=0.5", fc="#00529F", ec="white", lw=2)
-                                    ax.text(85, 5, f"Total Switches: {len(switches)}", color='white', ha='center', va='center', fontweight='bold', fontsize=10, bbox=bbox_props, zorder=5)
-
-                            st.pyplot(fig)
-                            plt.close(fig)
+                                fig_tts.update_xaxes(title='Possession Duration (minutes)')
+                                fig_tts.update_yaxes(title='Resulting Shot xG')
+                                st.plotly_chart(fig_tts, use_container_width=True)
+                            else:
+                                st.info("No shots to evaluate for transition speed.")
+
+                        # --- Defensive Transition ---
+                        if "Recovery vs. Loss Maps" in modules:
+                            st.subheader("🧯 Recovery vs. Loss Maps")
+                            if not transitions_df.empty:
+                                fig_rl = _make_plotly_pitch("Ball Losses and Subsequent Recoveries")
+                                xs, ys = [], []
+                                for _, r in transitions_df.iterrows():
+                                    xs.extend([r['loss_x'], r['rec_x'], None])
+                                    ys.extend([r['loss_y'], r['rec_y'], None])
+                                fig_rl.add_trace(go.Scatter(x=xs, y=ys, mode='lines', line=dict(color='#9ca3af', dash='dot', width=2), name='Recovery Link', hoverinfo='skip'))
+                                fig_rl.add_trace(go.Scatter(
+                                    x=transitions_df['loss_x'], y=transitions_df['loss_y'], mode='markers',
+                                    marker=dict(color='#ff4b4b', size=10, symbol='x', line=dict(color='white', width=1)), name='Loss',
+                                    customdata=np.column_stack([transitions_df['loss_player'], transitions_df['loss_min']]),
+                                    hovertemplate="<b>%{customdata[0]}</b><br>Loss Minute: %{customdata[1]}'<extra></extra>"
+                                ))
+                                fig_rl.add_trace(go.Scatter(
+                                    x=transitions_df['rec_x'], y=transitions_df['rec_y'], mode='markers',
+                                    marker=dict(color='#00ff85', size=10, symbol='circle', line=dict(color='white', width=1)), name='Recovery',
+                                    customdata=np.column_stack([transitions_df['rec_player'], transitions_df['rec_min']]),
+                                    hovertemplate="<b>%{customdata[0]}</b><br>Recovery Minute: %{customdata[1]}'<extra></extra>"
+                                ))
+                                st.plotly_chart(fig_rl, use_container_width=True)
+                            else:
+                                st.info("No loss-to-recovery pairs found in this range.")
+
+                        if "Defensive Reaction Time/Distance Curves" in modules:
+                            st.subheader("🧯 Defensive Reaction Time/Distance Curves")
+                            if not transitions_df.empty:
+                                transitions_df['Reaction Events'] = transitions_df['rec_idx'] - transitions_df['loss_idx']
+                                transitions_df['Recovery Distance'] = np.sqrt(
+                                    (transitions_df['rec_x'] - transitions_df['loss_x']) ** 2 +
+                                    (transitions_df['rec_y'] - transitions_df['loss_y']) ** 2
+                                )
+                                curve = transitions_df.groupby('Reaction Events', as_index=False)['Recovery Distance'].mean().sort_values('Reaction Events')
+
+                                fig_rt = go.Figure()
+                                fig_rt.add_trace(go.Scatter(
+                                    x=transitions_df['Reaction Events'], y=transitions_df['Recovery Distance'],
+                                    mode='markers', marker=dict(color='#36d6e7', size=9),
+                                    customdata=np.column_stack([transitions_df['loss_player'], transitions_df['rec_player']]),
+                                    name='Transitions',
+                                    hovertemplate="Loss: %{customdata[0]}<br>Recovery: %{customdata[1]}<br>Event Gap: %{x}<br>Distance: %{y:.1f}<extra></extra>"
+                                ))
+                                fig_rt.add_trace(go.Scatter(
+                                    x=curve['Reaction Events'], y=curve['Recovery Distance'], mode='lines+markers',
+                                    line=dict(color='#ffd700', width=3), marker=dict(size=7), name='Average Curve'
+                                ))
+                                fig_rt.update_layout(
+                                    template='plotly_dark',
+                                    title='Event-Based Defensive Reaction Profile',
+                                    xaxis_title='Events Between Loss and Recovery (proxy)',
+                                    yaxis_title='Pitch Distance Covered (Opta units)'
+                                )
+                                st.caption("Tracking sprint-speed is unavailable in event data, so this uses an event-gap and distance proxy.")
+                                st.plotly_chart(fig_rt, use_container_width=True)
+                            else:
+                                st.info("Insufficient transition pairs to model defensive reaction curves.")
+
+                        # --- Set Pieces ---
+                        if "Set Piece Targeting (Corners)" in modules:
+                            st.subheader("🎯 Set Piece Targeting (Corners)")
+                            corners = viz_df[(viz_df['Type'] == 1) & (viz_df['isCorner'])]
+                            if not corners.empty:
+                                fig_corners = _make_plotly_pitch("Corner Delivery Map")
+                                _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Successful'], "Successful Corner", "#00ffff", width=2)
+                                _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Unsuccessful'], "Unsuccessful Corner", "#ff4b4b", width=2, dash='dot')
+                                st.plotly_chart(fig_corners, use_container_width=True)
+                            else:
+                                st.info("No corners recorded in this range.")
+
+                        if "Free Kick Targeting" in modules:
+                            st.subheader("🎯 Free Kick Targeting")
+                            free_kicks = viz_df[(viz_df['Type'] == 1) & (viz_df['isFreeKick'])]
+                            if not free_kicks.empty:
+                                fig_fk = _make_plotly_pitch("Free-Kick Delivery Map")
+                                _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Successful'], "Successful FK", "#00ffff", width=2)
+                                _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Unsuccessful'], "Unsuccessful FK", "#ff4b4b", width=2, dash='dot')
+                                st.plotly_chart(fig_fk, use_container_width=True)
+                            else:
+                                st.info("No free kicks recorded in this range.")
+
+                        # --- Goalkeeping ---
+                        if "Shot Trajectory Map (GK View)" in modules:
+                            st.subheader("🧤 Shot Trajectory Map (GK View)")
+                            faced = opp_stats[(opp_stats['Type'].isin([13, 14, 15, 16])) & (opp_stats['Outcome'] != 'Own Goal')].copy()
+                            if not faced.empty:
+                                faced['DepthToGoal'] = 100 - faced['x']
+                                faced['LateralFromCenter'] = faced['y'] - 50
+                                faced['Result'] = np.where(faced['Type'] == 16, 'Goal Conceded', 'Saved/Missed')
+                                fig_gk = px.scatter(
+                                    faced,
+                                    x='LateralFromCenter', y='DepthToGoal',
+                                    color='Result',
+                                    color_discrete_map={'Goal Conceded': '#ff4b4b', 'Saved/Missed': '#00a3ff'},
+                                    hover_data=['Player', 'Minute', 'xG'],
+                                    template='plotly_dark',
+                                    title='Opponent Shot Origins from Goalkeeper Perspective'
+                                )
+                                fig_gk.update_xaxes(title='Lateral Offset from Goal Center (Left <-> Right)')
+                                fig_gk.update_yaxes(title='Distance from Goal Line')
+                                st.plotly_chart(fig_gk, use_container_width=True)
+                            else:
+                                st.info("No opponent shots faced in this range.")
+
+                        if "Goal Kick Direction Map" in modules:
+                            st.subheader("🧤 Goal Kick Direction Map")
+                            gkicks = viz_df[viz_df['Type'] == 52]
+                            if not gkicks.empty:
+                                fig_gkd = _make_plotly_pitch("Goal Kick Direction and Target Zones")
+                                _add_plotly_action_lines(fig_gkd, gkicks, "Goal Kick", "#3b82f6", width=3)
+                                st.plotly_chart(fig_gkd, use_container_width=True)
+                            else:
+                                st.info("No goal kicks recorded in this range.")
                     else:
                         st.error(f"Error: {err}")
 
