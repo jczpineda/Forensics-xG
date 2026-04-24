@@ -801,7 +801,8 @@ for mgr_idx, manager in enumerate(managers):
 
                         in_pos_options = [
                             "Progressive Passes Map", "Passes into Zone 14", "Pass Map", "Passing Heatmap",
-                            "Expected Threat (xT) Grid (Legacy)"
+                            "Expected Threat (xT) Grid (Legacy)", "High Value Pass Map",
+                            "Average Attacking & Defending Positions", "Match Progression"
                         ]
                         out_pos_options = [
                             "Defensive Actions Map", "Defensive Shield (Heatmap + Line)",
@@ -809,10 +810,10 @@ for mgr_idx, manager in enumerate(managers):
                         ]
                         attacking_phase_options = [
                             "Actions Leading to Shots (Legacy)", "Creator Map (Shot Assists) (Legacy)",
-                            "Zone 14 & Half-Spaces (Legacy)"
+                            "Zone 14 & Half-Spaces (Legacy)", "Zone Invasions"
                         ]
                         att_trans_options = [
-                            "Progression Trajectory Lines", "Time-to-Shot Scatter Plot"
+                            "Progression Trajectory Lines", "Time-to-Shot Scatter Plot", "Transition Map"
                         ]
                         def_trans_options = [
                             "Recovery vs. Loss Maps", "Defensive Reaction Time/Distance Curves"
@@ -975,6 +976,106 @@ for mgr_idx, manager in enumerate(managers):
                                         st.plotly_chart(fig_xtl, use_container_width=True)
                             else:
                                 st.info("No xT values available for current filters.")
+
+                        if "High Value Pass Map" in modules:
+                            st.subheader("🟢 High Value Pass Map")
+                            xT_thresh = viz_df.loc[viz_df['xT_Added'] > 0, 'xT_Added'].quantile(0.75) if (viz_df['xT_Added'] > 0).any() else 0.05
+                            high_xt = viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful') & (viz_df['xT_Added'] >= xT_thresh)]
+                            shot_idxs = viz_df[viz_df['Type'].isin([13, 14, 15, 16])]['Index'].values
+                            pre_shot_rows = []
+                            for si in shot_idxs:
+                                w = viz_df[(viz_df['Index'].between(si - 4, si - 1)) & (viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful')]
+                                if not w.empty:
+                                    pre_shot_rows.append(w.iloc[-1])
+                            pre_shot_df = pd.DataFrame(pre_shot_rows).drop_duplicates(subset=['Index']) if pre_shot_rows else pd.DataFrame()
+                            if not high_xt.empty or not pre_shot_df.empty:
+                                fig_hvp = _make_plotly_pitch("High Value Passes")
+                                if not high_xt.empty:
+                                    _add_plotly_action_lines(fig_hvp, high_xt, "High xT Pass", "#ffd700", width=2)
+                                if not pre_shot_df.empty:
+                                    _add_plotly_action_lines(fig_hvp, pre_shot_df, "Pre-Shot Pass", "#ff7f50", width=3)
+                                st.plotly_chart(fig_hvp, use_container_width=True)
+                                all_hv = pd.concat([high_xt, pre_shot_df]).drop_duplicates(subset=['Index']) if not pre_shot_df.empty else high_xt
+                                hv_leaders = all_hv.groupby('Player').size().reset_index(name='High Value Passes').sort_values('High Value Passes', ascending=False)
+                                if not hv_leaders.empty:
+                                    with st.expander("👥 High Value Pass Leaders"):
+                                        fig_hvl = px.bar(hv_leaders.head(8).sort_values('High Value Passes'), x='High Value Passes', y='Player', orientation='h', template='plotly_dark')
+                                        fig_hvl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_hvl, use_container_width=True)
+                            else:
+                                st.info("No high-value passes found in this range.")
+
+                        if "Average Attacking & Defending Positions" in modules:
+                            st.subheader("🟢 Average Attacking & Defending Positions")
+                            att_evts = viz_df[viz_df['Type'].isin([1, 3])]
+                            def_evts = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
+                            fig_avgpos = _make_plotly_pitch("Average Player Positions — Attack vs Defend")
+                            if not att_evts.empty:
+                                att_avg = att_evts.groupby('Player')[['x', 'y']].mean().reset_index()
+                                att_cnts = att_evts.groupby('Player').size().reset_index(name='Actions')
+                                att_avg = att_avg.merge(att_cnts, on='Player')
+                                node_s = np.clip(att_avg['Actions'] * 1.5, 10, 35)
+                                fig_avgpos.add_trace(go.Scatter(
+                                    x=att_avg['x'], y=att_avg['y'], mode='markers+text', name='Avg Attack Pos',
+                                    marker=dict(size=node_s, color='#00ff85', opacity=0.85, line=dict(color='white', width=1.5)),
+                                    text=att_avg['Player'].str.split(' ').str[-1],
+                                    textposition='top center', textfont=dict(color='#00ff85', size=9),
+                                    customdata=np.column_stack([att_avg['Player'], att_avg['Actions']]),
+                                    hovertemplate="<b>%{customdata[0]}</b><br>Avg Attack Pos<br>Actions: %{customdata[1]}<extra></extra>"
+                                ))
+                            if not def_evts.empty:
+                                def_avg = def_evts.groupby('Player')[['x', 'y']].mean().reset_index()
+                                def_cnts = def_evts.groupby('Player').size().reset_index(name='Actions')
+                                def_avg = def_avg.merge(def_cnts, on='Player')
+                                node_sd = np.clip(def_avg['Actions'] * 2, 10, 35)
+                                fig_avgpos.add_trace(go.Scatter(
+                                    x=def_avg['x'], y=def_avg['y'], mode='markers+text', name='Avg Defend Pos',
+                                    marker=dict(size=node_sd, color='#ff4b4b', opacity=0.85, symbol='diamond', line=dict(color='white', width=1.5)),
+                                    text=def_avg['Player'].str.split(' ').str[-1],
+                                    textposition='bottom center', textfont=dict(color='#ff4b4b', size=9),
+                                    customdata=np.column_stack([def_avg['Player'], def_avg['Actions']]),
+                                    hovertemplate="<b>%{customdata[0]}</b><br>Avg Defend Pos<br>Actions: %{customdata[1]}<extra></extra>"
+                                ))
+                            st.plotly_chart(fig_avgpos, use_container_width=True)
+                            if not att_evts.empty:
+                                att_act_leaders = att_evts.groupby('Player').size().reset_index(name='Attacking Actions').sort_values('Attacking Actions', ascending=False)
+                                with st.expander("👥 Attacking Activity Leaders"):
+                                    fig_aal = px.bar(att_act_leaders.head(8).sort_values('Attacking Actions'), x='Attacking Actions', y='Player', orientation='h', template='plotly_dark')
+                                    fig_aal.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                    st.plotly_chart(fig_aal, use_container_width=True)
+
+                        if "Match Progression" in modules:
+                            st.subheader("📈 Match Progression")
+                            all_match_shots = match_df[match_df['Type'].isin([13, 14, 15, 16])].sort_values('Minute')
+                            team_shots_mp = all_match_shots[all_match_shots['Team'] == sel_team].copy()
+                            opp_shots_mp = all_match_shots[all_match_shots['Team'] != sel_team].copy()
+                            mins_mp = list(range(0, max_minute + 2))
+                            team_cum, opp_cum = [], []
+                            rt, ro = 0.0, 0.0
+                            for m in mins_mp:
+                                rt += team_shots_mp.loc[team_shots_mp['Minute'] == m, 'xG'].sum()
+                                ro += opp_shots_mp.loc[opp_shots_mp['Minute'] == m, 'xG'].sum()
+                                team_cum.append(round(rt, 3))
+                                opp_cum.append(round(ro, 3))
+                            fig_mp = go.Figure()
+                            fig_mp.add_trace(go.Scatter(x=mins_mp, y=team_cum, mode='lines', line=dict(color='#00ff85', width=3), fill='tozeroy', fillcolor='rgba(0,255,133,0.10)', name=f'{sel_team} xG'))
+                            fig_mp.add_trace(go.Scatter(x=mins_mp, y=opp_cum, mode='lines', line=dict(color='#ff4b4b', width=3), fill='tozeroy', fillcolor='rgba(255,75,75,0.10)', name=f'{opp_team} xG'))
+                            for _, g in team_shots_mp[team_shots_mp['Type'] == 16].iterrows():
+                                m_idx = int(min(g['Minute'], max_minute))
+                                fig_mp.add_vline(x=g['Minute'], line_color='#00ff85', line_dash='dot', line_width=1.5)
+                                fig_mp.add_annotation(x=g['Minute'], y=team_cum[m_idx], text=f"⚽ {str(g['Player']).split(' ')[-1]}", font=dict(color='#00ff85', size=10), showarrow=False, yshift=14)
+                            for _, g in opp_shots_mp[opp_shots_mp['Type'] == 16].iterrows():
+                                m_idx = int(min(g['Minute'], max_minute))
+                                fig_mp.add_vline(x=g['Minute'], line_color='#ff4b4b', line_dash='dot', line_width=1.5)
+                                fig_mp.add_annotation(x=g['Minute'], y=opp_cum[m_idx], text=f"⚽ {str(g['Player']).split(' ')[-1]}", font=dict(color='#ff4b4b', size=10), showarrow=False, yshift=-14)
+                            fig_mp.update_layout(template='plotly_dark', title='Match Progression — Cumulative xG', xaxis_title='Minute', yaxis_title='Cumulative xG', hovermode='x unified', height=420)
+                            st.plotly_chart(fig_mp, use_container_width=True)
+                            xg_leaders_mp = team_shots_mp.groupby('Player')['xG'].sum().reset_index(name='xG').sort_values('xG', ascending=False)
+                            if not xg_leaders_mp.empty:
+                                with st.expander("👥 xG Leaders"):
+                                    fig_mpl = px.bar(xg_leaders_mp.head(8).sort_values('xG'), x='xG', y='Player', orientation='h', template='plotly_dark')
+                                    fig_mpl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                    st.plotly_chart(fig_mpl, use_container_width=True)
 
                         # --- Out of Possession ---
                         if "Defensive Actions Map" in modules:
@@ -1153,6 +1254,36 @@ for mgr_idx, manager in enumerate(managers):
                                     fig_zel.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
                                     st.plotly_chart(fig_zel, use_container_width=True)
 
+                        if "Zone Invasions" in modules:
+                            st.subheader("⚔️ Zone Invasions")
+                            final_third_inv = viz_df[
+                                (viz_df['Type'].isin([1, 3])) & (viz_df['Outcome'] == 'Successful') &
+                                (viz_df['endX'] > 66.7) & (viz_df['x'] <= 66.7)
+                            ].copy()
+                            box_entries_inv = viz_df[
+                                (viz_df['Type'].isin([1, 3])) & (viz_df['Outcome'] == 'Successful') &
+                                (viz_df['endX'] > 83) & (viz_df['endY'].between(21, 79)) &
+                                ~((viz_df['x'] > 83) & (viz_df['y'].between(21, 79)))
+                            ].copy()
+                            if not final_third_inv.empty or not box_entries_inv.empty:
+                                fig_zi = _make_plotly_pitch("Zone Invasions — Final Third & Box Entries")
+                                fig_zi.add_shape(type='rect', x0=66.7, y0=0, x1=100, y1=100, line=dict(color='#ffd700', width=1.5, dash='dot'), fillcolor='rgba(255,215,0,0.05)')
+                                fig_zi.add_shape(type='rect', x0=83, y0=21, x1=100, y1=79, line=dict(color='#ff4b4b', width=2), fillcolor='rgba(255,75,75,0.07)')
+                                if not final_third_inv.empty:
+                                    _add_plotly_action_lines(fig_zi, final_third_inv, "Final Third Entry", "#ffd700", width=2)
+                                if not box_entries_inv.empty:
+                                    _add_plotly_action_lines(fig_zi, box_entries_inv, "Box Entry", "#ff4b4b", width=2)
+                                st.plotly_chart(fig_zi, use_container_width=True)
+                                inv_all = pd.concat([final_third_inv, box_entries_inv]).drop_duplicates(subset=['Index'])
+                                inv_leaders = inv_all.groupby('Player').size().reset_index(name='Zone Invasions').sort_values('Zone Invasions', ascending=False)
+                                if not inv_leaders.empty:
+                                    with st.expander("👥 Zone Invasion Leaders"):
+                                        fig_zil = px.bar(inv_leaders.head(8).sort_values('Zone Invasions'), x='Zone Invasions', y='Player', orientation='h', template='plotly_dark')
+                                        fig_zil.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_zil, use_container_width=True)
+                            else:
+                                st.info("No zone invasion actions found in this range.")
+
                         # --- Attacking Transition ---
                         if "Progression Trajectory Lines" in modules:
                             st.subheader("⚡ Progression Trajectory Lines")
@@ -1252,6 +1383,69 @@ for mgr_idx, manager in enumerate(managers):
                                         st.plotly_chart(fig_ttsl, use_container_width=True)
                             else:
                                 st.info("No shots to evaluate for transition speed.")
+
+                        if "Transition Map" in modules:
+                            st.subheader("⚡ Transition Map")
+                            ball_wins_tm = plot_df[
+                                (plot_df['Type'].isin([7, 8, 12])) &
+                                ((plot_df['Outcome'] == 'Successful') | (plot_df['Type'].isin([8, 12])))
+                            ].sort_values('Index')
+                            fig_tm = _make_plotly_pitch("Transition Map — Passes, Shots & Goals from Ball Wins")
+                            t_pass_xs, t_pass_ys = [], []
+                            t_shot_rows, t_goal_rows, trans_event_frames = [], [], []
+                            for _, win in ball_wins_tm.iterrows():
+                                chain = match_df[
+                                    (match_df['Index'] > win['Index']) &
+                                    (match_df['Index'] <= win['Index'] + 40) &
+                                    (match_df['Team'] == sel_team)
+                                ].sort_values('Index')
+                                opp_touch = match_df[
+                                    (match_df['Index'] > win['Index']) &
+                                    (match_df['Team'] != sel_team) &
+                                    (match_df['Index'] <= win['Index'] + 40)
+                                ].sort_values('Index')
+                                if not opp_touch.empty:
+                                    chain = chain[chain['Index'] < opp_touch.iloc[0]['Index']]
+                                if chain.empty:
+                                    continue
+                                trans_event_frames.append(chain)
+                                for _, p in chain[chain['Type'].isin([1, 3])].iterrows():
+                                    t_pass_xs.extend([p['x'], p['endX'], None])
+                                    t_pass_ys.extend([p['y'], p['endY'], None])
+                                for _, s in chain[chain['Type'].isin([13, 14, 15])].iterrows():
+                                    t_shot_rows.append({'x': s['x'], 'y': s['y'], 'Player': s['Player'], 'Minute': int(s['Minute']), 'xG': round(float(s['xG']), 3)})
+                                for _, g in chain[(chain['Type'] == 16) & (chain['Outcome'] != 'Own Goal')].iterrows():
+                                    t_goal_rows.append({'x': g['x'], 'y': g['y'], 'Player': g['Player'], 'Minute': int(g['Minute']), 'xG': round(float(g['xG']), 3)})
+                            if t_pass_xs:
+                                fig_tm.add_trace(go.Scatter(x=t_pass_xs, y=t_pass_ys, mode='lines', line=dict(color='#36d6e7', width=2), opacity=0.45, name='Transition Pass', hoverinfo='skip'))
+                            if t_shot_rows:
+                                sdf_tm = pd.DataFrame(t_shot_rows)
+                                fig_tm.add_trace(go.Scatter(
+                                    x=sdf_tm['x'], y=sdf_tm['y'], mode='markers', name='Shot',
+                                    marker=dict(color='#ffd700', symbol='circle', size=12, line=dict(color='white', width=1)),
+                                    customdata=np.column_stack([sdf_tm['Player'], sdf_tm['Minute'], sdf_tm['xG']]),
+                                    hovertemplate="<b>%{customdata[0]}</b><br>Shot @ %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
+                                ))
+                            if t_goal_rows:
+                                gdf_tm = pd.DataFrame(t_goal_rows)
+                                fig_tm.add_trace(go.Scatter(
+                                    x=gdf_tm['x'], y=gdf_tm['y'], mode='markers', name='Goal',
+                                    marker=dict(color='#00ff85', symbol='star', size=17, line=dict(color='white', width=1.5)),
+                                    customdata=np.column_stack([gdf_tm['Player'], gdf_tm['Minute'], gdf_tm['xG']]),
+                                    hovertemplate="<b>%{customdata[0]}</b> ⚽<br>Goal @ %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
+                                ))
+                            if t_pass_xs or t_shot_rows or t_goal_rows:
+                                st.plotly_chart(fig_tm, use_container_width=True)
+                                if trans_event_frames:
+                                    trans_all_df = pd.concat(trans_event_frames)
+                                    trans_leaders = trans_all_df.groupby('Player').size().reset_index(name='Transition Involvements').sort_values('Transition Involvements', ascending=False)
+                                    if not trans_leaders.empty:
+                                        with st.expander("👥 Transition Involvement Leaders"):
+                                            fig_tml = px.bar(trans_leaders.head(8).sort_values('Transition Involvements'), x='Transition Involvements', y='Player', orientation='h', template='plotly_dark')
+                                            fig_tml.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                            st.plotly_chart(fig_tml, use_container_width=True)
+                            else:
+                                st.info("No transition sequences found in this range.")
 
                         # --- Defensive Transition ---
                         if "Recovery vs. Loss Maps" in modules:
