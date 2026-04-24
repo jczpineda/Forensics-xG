@@ -879,6 +879,11 @@ for mgr_idx, manager in enumerate(managers):
                             fig_pp = _make_plotly_pitch(f"{sel_team} Progressive Passes")
                             _add_plotly_action_lines(fig_pp, prog_passes, "Progressive Pass", "#00ff85", width=2)
                             st.plotly_chart(fig_pp, use_container_width=True)
+                            if not prog_leaders.empty:
+                                with st.expander("👥 Progressive Pass Leaders"):
+                                    fig_prog_lead = px.bar(prog_leaders.head(8).sort_values('Progressive Passes'), x='Progressive Passes', y='Player', orientation='h', template='plotly_dark')
+                                    fig_prog_lead.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                    st.plotly_chart(fig_prog_lead, use_container_width=True)
 
                         if "Passes into Zone 14" in modules:
                             st.subheader("🟢 Passes into Zone 14")
@@ -886,6 +891,11 @@ for mgr_idx, manager in enumerate(managers):
                             fig_z14.add_shape(type='rect', x0=65, y0=37, x1=85, y1=63, line=dict(color='#ffd700', width=2), fillcolor='rgba(255,215,0,0.15)')
                             _add_plotly_action_lines(fig_z14, zone14_passes, "Zone 14 Entry", "#ffd700", width=3)
                             st.plotly_chart(fig_z14, use_container_width=True)
+                            if not z14_leaders.empty:
+                                with st.expander("👥 Zone 14 Pass Leaders"):
+                                    fig_z14_lead = px.bar(z14_leaders.head(8).sort_values('Zone 14 Passes'), x='Zone 14 Passes', y='Player', orientation='h', template='plotly_dark')
+                                    fig_z14_lead.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                    st.plotly_chart(fig_z14_lead, use_container_width=True)
 
                         if "Pass Map" in modules:
                             st.subheader("🟢 Pass Map")
@@ -895,6 +905,12 @@ for mgr_idx, manager in enumerate(managers):
                             _add_plotly_action_lines(fig_pm, succ_passes_df, "Successful", "#00ff85", width=2)
                             _add_plotly_action_lines(fig_pm, fail_passes_df, "Unsuccessful", "#ff4b4b", width=2, dash='dot')
                             st.plotly_chart(fig_pm, use_container_width=True)
+                            pass_leaders = succ_passes_df.groupby('Player').size().reset_index(name='Completed Passes').sort_values('Completed Passes', ascending=False)
+                            if not pass_leaders.empty:
+                                with st.expander("👥 Pass Completion Leaders"):
+                                    fig_pl = px.bar(pass_leaders.head(8).sort_values('Completed Passes'), x='Completed Passes', y='Player', orientation='h', template='plotly_dark')
+                                    fig_pl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                    st.plotly_chart(fig_pl, use_container_width=True)
 
                         if "Passing Heatmap" in modules:
                             st.subheader("🟢 Passing Heatmap")
@@ -907,6 +923,12 @@ for mgr_idx, manager in enumerate(managers):
                                     showscale=True, colorbar=dict(title='Passes')
                                 ))
                                 st.plotly_chart(fig_ph, use_container_width=True)
+                                pass_vol_leaders = pass_heat.groupby('Player').size().reset_index(name='Passes').sort_values('Passes', ascending=False)
+                                if not pass_vol_leaders.empty:
+                                    with st.expander("👥 Pass Volume Leaders"):
+                                        fig_pvl = px.bar(pass_vol_leaders.head(8).sort_values('Passes'), x='Passes', y='Player', orientation='h', template='plotly_dark')
+                                        fig_pvl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_pvl, use_container_width=True)
                             else:
                                 st.info("No passes in this minute range.")
 
@@ -945,6 +967,12 @@ for mgr_idx, manager in enumerate(managers):
                                                 font=dict(color='white', size=9)
                                             )
                                 st.plotly_chart(fig_l_xt, use_container_width=True)
+                                xt_leaders = xt_acts.groupby('Player')['xT_Added'].sum().reset_index(name='xT Added').sort_values('xT Added', ascending=False)
+                                if not xt_leaders.empty:
+                                    with st.expander("👥 xT Leaders"):
+                                        fig_xtl = px.bar(xt_leaders.head(8).sort_values('xT Added'), x='xT Added', y='Player', orientation='h', template='plotly_dark')
+                                        fig_xtl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_xtl, use_container_width=True)
                             else:
                                 st.info("No xT values available for current filters.")
 
@@ -971,6 +999,12 @@ for mgr_idx, manager in enumerate(managers):
                                         hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>Outcome: %{customdata[2]}<extra></extra>"
                                     ))
                                 st.plotly_chart(fig_dm, use_container_width=True)
+                                def_leaders = def_map.groupby('Player').size().reset_index(name='Defensive Actions').sort_values('Defensive Actions', ascending=False)
+                                if not def_leaders.empty:
+                                    with st.expander("👥 Defensive Leaders"):
+                                        fig_dl = px.bar(def_leaders.head(8).sort_values('Defensive Actions'), x='Defensive Actions', y='Player', orientation='h', template='plotly_dark')
+                                        fig_dl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_dl, use_container_width=True)
                             else:
                                 st.info("No defensive actions recorded in this range.")
 
@@ -986,6 +1020,12 @@ for mgr_idx, manager in enumerate(managers):
                                 ))
                                 fig_ds.add_vline(x=avg_rec_height, line_dash='dash', line_color='#ffd700', line_width=3)
                                 st.plotly_chart(fig_ds, use_container_width=True)
+                                def_shield_leaders = def_heat.groupby('Player').size().reset_index(name='Def Actions').sort_values('Def Actions', ascending=False)
+                                if not def_shield_leaders.empty:
+                                    with st.expander("👥 Defensive Leaders"):
+                                        fig_dsl = px.bar(def_shield_leaders.head(8).sort_values('Def Actions'), x='Def Actions', y='Player', orientation='h', template='plotly_dark')
+                                        fig_dsl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_dsl, use_container_width=True)
                             else:
                                 st.info("No defensive actions to render.")
 
@@ -1011,6 +1051,12 @@ for mgr_idx, manager in enumerate(managers):
                                         hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<extra></extra>"
                                     ))
                                 st.plotly_chart(fig_l_def, use_container_width=True)
+                                def_leg_leaders = def_act.groupby('Player').size().reset_index(name='Def Actions').sort_values('Def Actions', ascending=False)
+                                if not def_leg_leaders.empty:
+                                    with st.expander("👥 Defensive Leaders"):
+                                        fig_dll = px.bar(def_leg_leaders.head(8).sort_values('Def Actions'), x='Def Actions', y='Player', orientation='h', template='plotly_dark')
+                                        fig_dll.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_dll, use_container_width=True)
                             else:
                                 st.info("No defensive actions available for current filters.")
 
@@ -1047,6 +1093,14 @@ for mgr_idx, manager in enumerate(managers):
                                         hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
                                     ))
                                 st.plotly_chart(fig_l_shots, use_container_width=True)
+                                xg_leaders = shots_df.groupby('Player')['xG'].sum().reset_index(name='Total xG').sort_values('Total xG', ascending=False)
+                                shot_counts = shots_df.groupby('Player').size().reset_index(name='Shots')
+                                xg_leaders = xg_leaders.merge(shot_counts, on='Player')
+                                if not xg_leaders.empty:
+                                    with st.expander("👥 Shot Leaders (xG)"):
+                                        fig_xgl = px.bar(xg_leaders.head(8).sort_values('Total xG'), x='Total xG', y='Player', orientation='h', template='plotly_dark', hover_data=['Shots'])
+                                        fig_xgl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_xgl, use_container_width=True)
                             else:
                                 st.info("No shot actions available for current filters.")
 
@@ -1064,6 +1118,12 @@ for mgr_idx, manager in enumerate(managers):
                                 fig_l_creator = _make_plotly_pitch("Creator Map")
                                 _add_plotly_action_lines(fig_l_creator, kp_df, "Key Pass", "#00ffff", width=2)
                                 st.plotly_chart(fig_l_creator, use_container_width=True)
+                                creator_leaders = kp_df.groupby('Player').size().reset_index(name='Key Passes').sort_values('Key Passes', ascending=False)
+                                if not creator_leaders.empty:
+                                    with st.expander("👥 Creator Leaders"):
+                                        fig_crl = px.bar(creator_leaders.head(8).sort_values('Key Passes'), x='Key Passes', y='Player', orientation='h', template='plotly_dark')
+                                        fig_crl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_crl, use_container_width=True)
                             else:
                                 st.info("No key-pass actions available for current filters.")
 
@@ -1087,8 +1147,14 @@ for mgr_idx, manager in enumerate(managers):
                             if not zone_entries.empty:
                                 _add_plotly_action_lines(fig_l_zones, zone_entries, "Zone Entry", "#ffffff", width=2)
                             st.plotly_chart(fig_l_zones, use_container_width=True)
+                            if not z14_leaders.empty:
+                                with st.expander("👥 Zone Entry Leaders"):
+                                    fig_zel = px.bar(z14_leaders.head(8).sort_values('Zone 14 Passes'), x='Zone 14 Passes', y='Player', orientation='h', template='plotly_dark')
+                                    fig_zel.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                    st.plotly_chart(fig_zel, use_container_width=True)
 
                         # --- Attacking Transition ---
+                        if "Progression Trajectory Lines" in modules:
                             st.subheader("⚡ Progression Trajectory Lines")
                             ball_wins = plot_df[
                                 (plot_df['Type'].isin([7, 8, 12])) &
@@ -1132,6 +1198,12 @@ for mgr_idx, manager in enumerate(managers):
                                 st.plotly_chart(fig_ptl, use_container_width=True)
                             else:
                                 st.info("No ball-win transition sequences available in this range.")
+                            bw_leaders = ball_wins.groupby('Player').size().reset_index(name='Ball Wins').sort_values('Ball Wins', ascending=False)
+                            if not bw_leaders.empty:
+                                with st.expander("👥 Ball Win Leaders"):
+                                    fig_bwl = px.bar(bw_leaders.head(8).sort_values('Ball Wins'), x='Ball Wins', y='Player', orientation='h', template='plotly_dark')
+                                    fig_bwl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                    st.plotly_chart(fig_bwl, use_container_width=True)
 
                         if "Time-to-Shot Scatter Plot" in modules:
                             st.subheader("⚡ Time-to-Shot Scatter Plot")
@@ -1172,6 +1244,12 @@ for mgr_idx, manager in enumerate(managers):
                                 fig_tts.update_xaxes(title='Possession Duration (minutes)')
                                 fig_tts.update_yaxes(title='Resulting Shot xG')
                                 st.plotly_chart(fig_tts, use_container_width=True)
+                                tts_leaders = tts_df.groupby('Shooter')['xG'].sum().reset_index(name='Total xG').sort_values('Total xG', ascending=False)
+                                if not tts_leaders.empty:
+                                    with st.expander("👥 Shot Leaders"):
+                                        fig_ttsl = px.bar(tts_leaders.head(8).sort_values('Total xG'), x='Total xG', y='Shooter', orientation='h', template='plotly_dark', labels={'Shooter': 'Player'})
+                                        fig_ttsl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_ttsl, use_container_width=True)
                             else:
                                 st.info("No shots to evaluate for transition speed.")
 
@@ -1198,6 +1276,12 @@ for mgr_idx, manager in enumerate(managers):
                                     hovertemplate="<b>%{customdata[0]}</b><br>Recovery Minute: %{customdata[1]}'<extra></extra>"
                                 ))
                                 st.plotly_chart(fig_rl, use_container_width=True)
+                                rec_leaders = transitions_df.groupby('rec_player').size().reset_index(name='Recoveries').sort_values('Recoveries', ascending=False).rename(columns={'rec_player': 'Player'})
+                                if not rec_leaders.empty:
+                                    with st.expander("👥 Recovery Leaders"):
+                                        fig_rcl = px.bar(rec_leaders.head(8).sort_values('Recoveries'), x='Recoveries', y='Player', orientation='h', template='plotly_dark')
+                                        fig_rcl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_rcl, use_container_width=True)
                             else:
                                 st.info("No loss-to-recovery pairs found in this range.")
 
@@ -1243,6 +1327,12 @@ for mgr_idx, manager in enumerate(managers):
                                 _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Successful'], "Successful Corner", "#00ffff", width=2)
                                 _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Unsuccessful'], "Unsuccessful Corner", "#ff4b4b", width=2, dash='dot')
                                 st.plotly_chart(fig_corners, use_container_width=True)
+                                corner_leaders = corners.groupby('Player').size().reset_index(name='Corners').sort_values('Corners', ascending=False)
+                                if not corner_leaders.empty:
+                                    with st.expander("👥 Corner Delivery Leaders"):
+                                        fig_cornl = px.bar(corner_leaders.head(8).sort_values('Corners'), x='Corners', y='Player', orientation='h', template='plotly_dark')
+                                        fig_cornl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_cornl, use_container_width=True)
                             else:
                                 st.info("No corners recorded in this range.")
 
@@ -1254,6 +1344,12 @@ for mgr_idx, manager in enumerate(managers):
                                 _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Successful'], "Successful FK", "#00ffff", width=2)
                                 _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Unsuccessful'], "Unsuccessful FK", "#ff4b4b", width=2, dash='dot')
                                 st.plotly_chart(fig_fk, use_container_width=True)
+                                fk_leaders = free_kicks.groupby('Player').size().reset_index(name='Free Kicks').sort_values('Free Kicks', ascending=False)
+                                if not fk_leaders.empty:
+                                    with st.expander("👥 Free Kick Leaders"):
+                                        fig_fkl = px.bar(fk_leaders.head(8).sort_values('Free Kicks'), x='Free Kicks', y='Player', orientation='h', template='plotly_dark')
+                                        fig_fkl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_fkl, use_container_width=True)
                             else:
                                 st.info("No free kicks recorded in this range.")
 
@@ -1277,6 +1373,12 @@ for mgr_idx, manager in enumerate(managers):
                                 fig_gk.update_xaxes(title='Lateral Offset from Goal Center (Left <-> Right)')
                                 fig_gk.update_yaxes(title='Distance from Goal Line')
                                 st.plotly_chart(fig_gk, use_container_width=True)
+                                threat_leaders = faced.groupby('Player')['xG'].sum().reset_index(name='Total xG').sort_values('Total xG', ascending=False)
+                                if not threat_leaders.empty:
+                                    with st.expander("👥 Most Threatening Players (Opp.)"):
+                                        fig_thl = px.bar(threat_leaders.head(8).sort_values('Total xG'), x='Total xG', y='Player', orientation='h', template='plotly_dark')
+                                        fig_thl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_thl, use_container_width=True)
                             else:
                                 st.info("No opponent shots faced in this range.")
 
@@ -1304,6 +1406,12 @@ for mgr_idx, manager in enumerate(managers):
                                     fig_l_build = _make_plotly_pitch("Legacy Build-Up Phase")
                                     _add_plotly_action_lines(fig_l_build, build_up, "Build-Up Pass", "#00ffff", width=2)
                                     st.plotly_chart(fig_l_build, use_container_width=True)
+                                    build_leaders = build_up.groupby('Player').size().reset_index(name='Build-Up Passes').sort_values('Build-Up Passes', ascending=False)
+                                    if not build_leaders.empty:
+                                        with st.expander("👥 Build-Up Leaders"):
+                                            fig_bul = px.bar(build_leaders.head(8).sort_values('Build-Up Passes'), x='Build-Up Passes', y='Player', orientation='h', template='plotly_dark')
+                                            fig_bul.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                            st.plotly_chart(fig_bul, use_container_width=True)
                                 else:
                                     st.info("No legacy build-up actions available for current filters.")
 
@@ -1348,32 +1456,6 @@ for mgr_idx, manager in enumerate(managers):
                                 else:
                                     st.info("No legacy passing-network values available for current filters.")
 
-                        # --- Leaders moved below all telemetry charts ---
-                        st.divider()
-                        st.subheader("🏁 Team Progression Leaders")
-                        lb1, lb2 = st.columns(2)
-                        with lb1:
-                            if not prog_leaders.empty:
-                                fig_prog_lead = px.bar(
-                                    prog_leaders.head(10).sort_values('Progressive Passes', ascending=True),
-                                    x='Progressive Passes', y='Player', orientation='h',
-                                    template='plotly_dark',
-                                    title='Progressive Pass Leaders'
-                                )
-                                st.plotly_chart(fig_prog_lead, use_container_width=True)
-                            else:
-                                st.info("No progressive pass leaders in this range.")
-                        with lb2:
-                            if not z14_leaders.empty:
-                                fig_z14_lead = px.bar(
-                                    z14_leaders.head(10).sort_values('Zone 14 Passes', ascending=True),
-                                    x='Zone 14 Passes', y='Player', orientation='h',
-                                    template='plotly_dark',
-                                    title='Zone 14 Pass Leaders'
-                                )
-                                st.plotly_chart(fig_z14_lead, use_container_width=True)
-                            else:
-                                st.info("No Zone 14 leaders in this range.")
                     else:
                         st.error(f"Error: {err}")
 
