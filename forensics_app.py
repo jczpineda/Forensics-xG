@@ -800,10 +800,16 @@ for mgr_idx, manager in enumerate(managers):
                         st.markdown("#### 🗂️ Select Evidence Layers")
 
                         in_pos_options = [
-                            "Progressive Passes Map", "Passes into Zone 14", "Pass Map", "Passing Heatmap"
+                            "Progressive Passes Map", "Passes into Zone 14", "Pass Map", "Passing Heatmap",
+                            "Expected Threat (xT) Grid (Legacy)"
                         ]
                         out_pos_options = [
-                            "Defensive Actions Map", "Defensive Shield (Heatmap + Line)"
+                            "Defensive Actions Map", "Defensive Shield (Heatmap + Line)",
+                            "Defensive Actions (Legacy)"
+                        ]
+                        attacking_phase_options = [
+                            "Actions Leading to Shots (Legacy)", "Creator Map (Shot Assists) (Legacy)",
+                            "Zone 14 & Half-Spaces (Legacy)"
                         ]
                         att_trans_options = [
                             "Progression Trajectory Lines", "Time-to-Shot Scatter Plot"
@@ -818,12 +824,7 @@ for mgr_idx, manager in enumerate(managers):
                             "Shot Trajectory Map (GK View)", "Goal Kick Direction Map"
                         ]
                         legacy_options = [
-                            "Expected Threat (xT) Grid (Legacy)",
-                            "Actions Leading to Shots (Legacy)",
-                            "Creator Map (Shot Assists) (Legacy)",
-                            "Defensive Actions (Legacy)",
                             "The Architect (Build-Up Phase) (Legacy)",
-                            "Zone 14 & Half-Spaces (Legacy)",
                             "Passing Network (Structure) (Legacy)"
                         ]
 
@@ -833,23 +834,25 @@ for mgr_idx, manager in enumerate(managers):
                         with row1_c2:
                             out_pos_mods = st.multiselect("🔴 Out of Possession", out_pos_options, key=f"mop_{manager}")
                         with row1_c3:
-                            att_trans_mods = st.multiselect("⚡ Attacking Transition", att_trans_options, key=f"mat_{manager}")
+                            attacking_phase_mods = st.multiselect("⚔️ Attacking Phase", attacking_phase_options, key=f"map_{manager}")
 
                         row2_c1, row2_c2, row2_c3 = st.columns(3)
                         with row2_c1:
-                            def_trans_mods = st.multiselect("🧯 Defensive Transition", def_trans_options, key=f"mdt_{manager}")
+                            att_trans_mods = st.multiselect("⚡ Attacking Transition", att_trans_options, key=f"mat_{manager}")
                         with row2_c2:
-                            set_mods = st.multiselect("🎯 Set-Pieces", set_options, key=f"msp_{manager}")
+                            def_trans_mods = st.multiselect("🧯 Defensive Transition", def_trans_options, key=f"mdt_{manager}")
                         with row2_c3:
-                            gk_mods = st.multiselect("🧤 Goalkeeping", gk_options, key=f"mgk_{manager}")
+                            set_mods = st.multiselect("🎯 Set-Pieces", set_options, key=f"msp_{manager}")
 
-                        row3_c1, row3_c2 = st.columns([2, 1])
+                        row3_c1, row3_c2, row3_c3 = st.columns(3)
                         with row3_c1:
-                            legacy_mods = st.multiselect("🧭 Legacy Telemetry", legacy_options, key=f"mlg_{manager}")
+                            gk_mods = st.multiselect("🧤 Goalkeeping", gk_options, key=f"mgk_{manager}")
                         with row3_c2:
+                            legacy_mods = st.multiselect("🧭 Legacy Telemetry", legacy_options, key=f"mlg_{manager}")
+                        with row3_c3:
                             st.caption("Legacy maps now live inside Evidence Layers.")
 
-                        modules = in_pos_mods + out_pos_mods + att_trans_mods + def_trans_mods + set_mods + gk_mods + legacy_mods
+                        modules = in_pos_mods + out_pos_mods + attacking_phase_mods + att_trans_mods + def_trans_mods + set_mods + gk_mods + legacy_mods
 
                         # Reusable transition pairing for defensive-transition modules
                         losses_base = plot_df[(plot_df['Type'].isin([1, 3])) & (plot_df['Outcome'] == 'Unsuccessful')].sort_values('Index')
@@ -907,6 +910,44 @@ for mgr_idx, manager in enumerate(managers):
                             else:
                                 st.info("No passes in this minute range.")
 
+                        if "Expected Threat (xT) Grid (Legacy)" in modules:
+                            st.subheader("🟢 Expected Threat (xT) Grid")
+                            xt_acts = viz_df[(viz_df['Type'].isin([1, 3])) & (viz_df['Outcome'] == 'Successful') & (viz_df['xT_Added'] > 0)]
+                            if not xt_acts.empty:
+                                fig_l_xt = _make_plotly_pitch("xT Grid")
+                                xbins = np.linspace(0, 100, 13)
+                                ybins = np.linspace(0, 100, 9)
+                                z, xedges, yedges = np.histogram2d(
+                                    xt_acts['x'].values,
+                                    xt_acts['y'].values,
+                                    bins=[xbins, ybins],
+                                    weights=xt_acts['xT_Added'].values
+                                )
+                                x_centers = (xedges[:-1] + xedges[1:]) / 2
+                                y_centers = (yedges[:-1] + yedges[1:]) / 2
+                                fig_l_xt.add_trace(go.Heatmap(
+                                    x=x_centers,
+                                    y=y_centers,
+                                    z=z.T,
+                                    colorscale='Magma',
+                                    opacity=0.75,
+                                    showscale=True,
+                                    colorbar=dict(title='xT')
+                                ))
+                                for xi, xv in enumerate(x_centers):
+                                    for yi, yv in enumerate(y_centers):
+                                        val = z[xi, yi]
+                                        if val > 0.001:
+                                            fig_l_xt.add_annotation(
+                                                x=float(xv), y=float(yv),
+                                                text=f"{val:.3f}",
+                                                showarrow=False,
+                                                font=dict(color='white', size=9)
+                                            )
+                                st.plotly_chart(fig_l_xt, use_container_width=True)
+                            else:
+                                st.info("No xT values available for current filters.")
+
                         # --- Out of Possession ---
                         if "Defensive Actions Map" in modules:
                             st.subheader("🔴 Defensive Actions Map")
@@ -948,8 +989,106 @@ for mgr_idx, manager in enumerate(managers):
                             else:
                                 st.info("No defensive actions to render.")
 
+                        if "Defensive Actions (Legacy)" in modules:
+                            st.subheader("🔴 Defensive Actions")
+                            def_act = viz_df[viz_df['Type'].isin([4, 7, 8, 12])].copy()
+                            if not def_act.empty:
+                                def_act['DefAction'] = def_act['Type'].map({4: 'Foul', 7: 'Tackle', 8: 'Interception', 12: 'Clearance'})
+                                fig_l_def = _make_plotly_pitch("Defensive Actions")
+                                for action, color, symbol in [
+                                    ('Tackle', '#3399ff', 'diamond'),
+                                    ('Interception', '#ff9900', 'square'),
+                                    ('Clearance', '#cbd5e1', 'triangle-up'),
+                                    ('Foul', '#ff4b4b', 'x')
+                                ]:
+                                    adf = def_act[def_act['DefAction'] == action]
+                                    if adf.empty:
+                                        continue
+                                    fig_l_def.add_trace(go.Scatter(
+                                        x=adf['x'], y=adf['y'], mode='markers', name=action,
+                                        marker=dict(color=color, symbol=symbol, size=10, line=dict(color='white', width=1)),
+                                        customdata=np.column_stack([adf['Player'], adf['Minute']]),
+                                        hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<extra></extra>"
+                                    ))
+                                st.plotly_chart(fig_l_def, use_container_width=True)
+                            else:
+                                st.info("No defensive actions available for current filters.")
+
+                        # --- Attacking Phase ---
+                        if "Actions Leading to Shots (Legacy)" in modules:
+                            st.subheader("⚔️ Actions Leading to Shots")
+                            shots_df = viz_df[viz_df['Type'].isin([13, 14, 15, 16])].copy()
+                            if not shots_df.empty:
+                                shots_df['ShotResult'] = np.select(
+                                    [
+                                        (shots_df['Type'] == 16) & (shots_df['Outcome'] != 'Own Goal'),
+                                        shots_df['isBlocked'],
+                                        shots_df['Type'] == 15,
+                                    ],
+                                    ['Goal', 'Blocked', 'Saved'],
+                                    default='Missed'
+                                )
+                                fig_l_shots = _make_plotly_pitch("Shot Outcomes")
+                                style = {
+                                    'Goal': ('#00ff85', 'star', 15),
+                                    'Blocked': ('#aaaaaa', 'x', 10),
+                                    'Saved': ('#ffd700', 'circle', 10),
+                                    'Missed': ('#ff4b4b', 'diamond-open', 10),
+                                }
+                                for res in ['Goal', 'Saved', 'Blocked', 'Missed']:
+                                    sdf = shots_df[shots_df['ShotResult'] == res]
+                                    if sdf.empty:
+                                        continue
+                                    color, symbol, size = style[res]
+                                    fig_l_shots.add_trace(go.Scatter(
+                                        x=sdf['x'], y=sdf['y'], mode='markers', name=res,
+                                        marker=dict(color=color, symbol=symbol, size=size, line=dict(color='white', width=1)),
+                                        customdata=np.column_stack([sdf['Player'], sdf['Minute'], sdf['xG'].round(3)]),
+                                        hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
+                                    ))
+                                st.plotly_chart(fig_l_shots, use_container_width=True)
+                            else:
+                                st.info("No shot actions available for current filters.")
+
+                        if "Creator Map (Shot Assists) (Legacy)" in modules:
+                            st.subheader("⚔️ Creator Map (Shot Assists)")
+                            shots_for_assists = viz_df[viz_df['Type'].isin([13, 14, 15, 16])]
+                            key_passes = []
+                            for _, shot in shots_for_assists.iterrows():
+                                prev = viz_df[(viz_df['Index'] < shot['Index']) & (viz_df['Index'] >= shot['Index'] - 5)]
+                                prev_pass = prev[(prev['Type'] == 1) & (prev['Outcome'] == 'Successful')]
+                                if not prev_pass.empty:
+                                    key_passes.append(prev_pass.iloc[-1])
+                            if key_passes:
+                                kp_df = pd.DataFrame(key_passes)
+                                fig_l_creator = _make_plotly_pitch("Creator Map")
+                                _add_plotly_action_lines(fig_l_creator, kp_df, "Key Pass", "#00ffff", width=2)
+                                st.plotly_chart(fig_l_creator, use_container_width=True)
+                            else:
+                                st.info("No key-pass actions available for current filters.")
+
+                        if "Zone 14 & Half-Spaces (Legacy)" in modules:
+                            st.subheader("⚔️ Zone 14 and Half-Spaces")
+                            fig_l_zones = _make_plotly_pitch("Zone 14 and Half-Spaces")
+                            zone_defs = [
+                                ('Zone 14', 65, 85, 37, 63, '#ffd700'),
+                                ('LHS', 65, 85, 20, 37, '#ff4b4b'),
+                                ('RHS', 65, 85, 63, 80, '#ff4b4b'),
+                            ]
+                            for _, xmin, xmax, ymin, ymax, color in zone_defs:
+                                fig_l_zones.add_shape(type='rect', x0=xmin, y0=ymin, x1=xmax, y1=ymax,
+                                                      line=dict(color='white', width=1), fillcolor=color, opacity=0.15)
+                            zone_entries = viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful')]
+                            zone_entries = zone_entries[
+                                ((zone_entries['endX'].between(65, 85)) & (zone_entries['endY'].between(37, 63))) |
+                                ((zone_entries['endX'].between(65, 85)) & (zone_entries['endY'].between(20, 37))) |
+                                ((zone_entries['endX'].between(65, 85)) & (zone_entries['endY'].between(63, 80)))
+                            ]
+                            if not zone_entries.empty:
+                                _add_plotly_action_lines(fig_l_zones, zone_entries, "Zone Entry", "#ffffff", width=2)
+                            st.plotly_chart(fig_l_zones, use_container_width=True)
+
                         # --- Attacking Transition ---
-                        if "Progression Trajectory Lines" in modules:
                             st.subheader("⚡ Progression Trajectory Lines")
                             ball_wins = plot_df[
                                 (plot_df['Type'].isin([7, 8, 12])) &
@@ -1157,120 +1296,6 @@ for mgr_idx, manager in enumerate(managers):
                         legacy_pitch_mods = legacy_mods.copy()
                         if legacy_pitch_mods:
                             st.markdown("#### 🧭 Legacy Telemetry Maps")
-                            if "Expected Threat (xT) Grid (Legacy)" in legacy_pitch_mods:
-                                st.subheader("🧭 Legacy: Expected Threat (xT) Grid")
-                                xt_acts = viz_df[(viz_df['Type'].isin([1, 3])) & (viz_df['Outcome'] == 'Successful') & (viz_df['xT_Added'] > 0)]
-                                if not xt_acts.empty:
-                                    fig_l_xt = _make_plotly_pitch("Legacy xT Grid")
-                                    xbins = np.linspace(0, 100, 13)
-                                    ybins = np.linspace(0, 100, 9)
-                                    z, xedges, yedges = np.histogram2d(
-                                        xt_acts['x'].values,
-                                        xt_acts['y'].values,
-                                        bins=[xbins, ybins],
-                                        weights=xt_acts['xT_Added'].values
-                                    )
-                                    x_centers = (xedges[:-1] + xedges[1:]) / 2
-                                    y_centers = (yedges[:-1] + yedges[1:]) / 2
-                                    fig_l_xt.add_trace(go.Heatmap(
-                                        x=x_centers,
-                                        y=y_centers,
-                                        z=z.T,
-                                        colorscale='Magma',
-                                        opacity=0.75,
-                                        showscale=True,
-                                        colorbar=dict(title='xT')
-                                    ))
-                                    for xi, xv in enumerate(x_centers):
-                                        for yi, yv in enumerate(y_centers):
-                                            val = z[xi, yi]
-                                            if val > 0.001:
-                                                fig_l_xt.add_annotation(
-                                                    x=float(xv), y=float(yv),
-                                                    text=f"{val:.3f}",
-                                                    showarrow=False,
-                                                    font=dict(color='white', size=9)
-                                                )
-                                    st.plotly_chart(fig_l_xt, use_container_width=True)
-                                else:
-                                    st.info("No legacy xT values available for current filters.")
-
-                            if "Actions Leading to Shots (Legacy)" in legacy_pitch_mods:
-                                st.subheader("🧭 Legacy: Actions Leading to Shots")
-                                shots_df = viz_df[viz_df['Type'].isin([13, 14, 15, 16])].copy()
-                                if not shots_df.empty:
-                                    shots_df['ShotResult'] = np.select(
-                                        [
-                                            (shots_df['Type'] == 16) & (shots_df['Outcome'] != 'Own Goal'),
-                                            shots_df['isBlocked'],
-                                            shots_df['Type'] == 15,
-                                        ],
-                                        ['Goal', 'Blocked', 'Saved'],
-                                        default='Missed'
-                                    )
-                                    fig_l_shots = _make_plotly_pitch("Legacy Shot Outcomes")
-                                    style = {
-                                        'Goal': ('#00ff85', 'star', 15),
-                                        'Blocked': ('#aaaaaa', 'x', 10),
-                                        'Saved': ('#ffd700', 'circle', 10),
-                                        'Missed': ('#ff4b4b', 'diamond-open', 10),
-                                    }
-                                    for res in ['Goal', 'Saved', 'Blocked', 'Missed']:
-                                        sdf = shots_df[shots_df['ShotResult'] == res]
-                                        if sdf.empty:
-                                            continue
-                                        color, symbol, size = style[res]
-                                        fig_l_shots.add_trace(go.Scatter(
-                                            x=sdf['x'], y=sdf['y'], mode='markers', name=res,
-                                            marker=dict(color=color, symbol=symbol, size=size, line=dict(color='white', width=1)),
-                                            customdata=np.column_stack([sdf['Player'], sdf['Minute'], sdf['xG'].round(3)]),
-                                            hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
-                                        ))
-                                    st.plotly_chart(fig_l_shots, use_container_width=True)
-                                else:
-                                    st.info("No legacy shot actions available for current filters.")
-
-                            if "Creator Map (Shot Assists) (Legacy)" in legacy_pitch_mods:
-                                st.subheader("🧭 Legacy: Creator Map (Shot Assists)")
-                                shots_for_assists = viz_df[viz_df['Type'].isin([13, 14, 15, 16])]
-                                key_passes = []
-                                for _, shot in shots_for_assists.iterrows():
-                                    prev = viz_df[(viz_df['Index'] < shot['Index']) & (viz_df['Index'] >= shot['Index'] - 5)]
-                                    prev_pass = prev[(prev['Type'] == 1) & (prev['Outcome'] == 'Successful')]
-                                    if not prev_pass.empty:
-                                        key_passes.append(prev_pass.iloc[-1])
-                                if key_passes:
-                                    kp_df = pd.DataFrame(key_passes)
-                                    fig_l_creator = _make_plotly_pitch("Legacy Creator Map")
-                                    _add_plotly_action_lines(fig_l_creator, kp_df, "Key Pass", "#00ffff", width=2)
-                                    st.plotly_chart(fig_l_creator, use_container_width=True)
-                                else:
-                                    st.info("No legacy key-pass actions available for current filters.")
-
-                            if "Defensive Actions (Legacy)" in legacy_pitch_mods:
-                                st.subheader("🧭 Legacy: Defensive Actions")
-                                def_act = viz_df[viz_df['Type'].isin([4, 7, 8, 12])].copy()
-                                if not def_act.empty:
-                                    def_act['DefAction'] = def_act['Type'].map({4: 'Foul', 7: 'Tackle', 8: 'Interception', 12: 'Clearance'})
-                                    fig_l_def = _make_plotly_pitch("Legacy Defensive Actions")
-                                    for action, color, symbol in [
-                                        ('Tackle', '#3399ff', 'diamond'),
-                                        ('Interception', '#ff9900', 'square'),
-                                        ('Clearance', '#cbd5e1', 'triangle-up'),
-                                        ('Foul', '#ff4b4b', 'x')
-                                    ]:
-                                        adf = def_act[def_act['DefAction'] == action]
-                                        if adf.empty:
-                                            continue
-                                        fig_l_def.add_trace(go.Scatter(
-                                            x=adf['x'], y=adf['y'], mode='markers', name=action,
-                                            marker=dict(color=color, symbol=symbol, size=10, line=dict(color='white', width=1)),
-                                            customdata=np.column_stack([adf['Player'], adf['Minute']]),
-                                            hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<extra></extra>"
-                                        ))
-                                    st.plotly_chart(fig_l_def, use_container_width=True)
-                                else:
-                                    st.info("No legacy defensive actions available for current filters.")
 
                             if "The Architect (Build-Up Phase) (Legacy)" in legacy_pitch_mods:
                                 st.subheader("🧭 Legacy: The Architect (Build-Up Phase)")
@@ -1281,27 +1306,6 @@ for mgr_idx, manager in enumerate(managers):
                                     st.plotly_chart(fig_l_build, use_container_width=True)
                                 else:
                                     st.info("No legacy build-up actions available for current filters.")
-
-                            if "Zone 14 & Half-Spaces (Legacy)" in legacy_pitch_mods:
-                                st.subheader("🧭 Legacy: Zone 14 and Half-Spaces")
-                                fig_l_zones = _make_plotly_pitch("Legacy Zone 14 and Half-Spaces")
-                                zone_defs = [
-                                    ('Zone 14', 65, 85, 37, 63, '#ffd700'),
-                                    ('LHS', 65, 85, 20, 37, '#ff4b4b'),
-                                    ('RHS', 65, 85, 63, 80, '#ff4b4b'),
-                                ]
-                                for _, xmin, xmax, ymin, ymax, color in zone_defs:
-                                    fig_l_zones.add_shape(type='rect', x0=xmin, y0=ymin, x1=xmax, y1=ymax,
-                                                          line=dict(color='white', width=1), fillcolor=color, opacity=0.15)
-                                zone_entries = viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful')]
-                                zone_entries = zone_entries[
-                                    ((zone_entries['endX'].between(65, 85)) & (zone_entries['endY'].between(37, 63))) |
-                                    ((zone_entries['endX'].between(65, 85)) & (zone_entries['endY'].between(20, 37))) |
-                                    ((zone_entries['endX'].between(65, 85)) & (zone_entries['endY'].between(63, 80)))
-                                ]
-                                if not zone_entries.empty:
-                                    _add_plotly_action_lines(fig_l_zones, zone_entries, "Zone Entry", "#ffffff", width=2)
-                                st.plotly_chart(fig_l_zones, use_container_width=True)
 
                             if "Passing Network (Structure) (Legacy)" in legacy_pitch_mods:
                                 st.subheader("🧭 Legacy: Passing Network (Structure)")
