@@ -844,7 +844,7 @@ for mgr_idx, manager in enumerate(managers):
                             "Average Attacking & Defending Positions"
                         ]
                         att_trans_options = [
-                            "Progression Trajectory Lines", "Time-to-Shot Scatter Plot", "Transition Map"
+                            "Time-to-Shot Scatter Plot", "Transition Map"
                         ]
                         def_trans_options = [
                             "Recovery vs. Loss Maps", "Defensive Reaction Time/Distance Curves"
@@ -1873,59 +1873,6 @@ for mgr_idx, manager in enumerate(managers):
                                         )
 
                         # --- Attacking Transition ---
-                        if "Progression Trajectory Lines" in modules:
-                            st.subheader("⚡ Progression Trajectory Lines")
-                            ball_wins = plot_df[
-                                (plot_df['Type'].isin([7, 8, 12])) &
-                                ((plot_df['Outcome'] == 'Successful') | (plot_df['Type'].isin([8, 12])))
-                            ].sort_values('Index')
-                            _mc1, _mc2 = st.columns(2)
-                            _mc1.metric("Ball Wins", len(ball_wins))
-                            _mc2.metric("Players", ball_wins['Player'].nunique() if not ball_wins.empty else 0)
-                            fig_ptl = _make_plotly_pitch("First 3–4 Actions After Ball Wins — each colour = one sequence")
-                            palette = ['#00ff85', '#36d6e7', '#ffd700', '#ff7f50']
-                            seq_count = 0
-                            for _, win in ball_wins.head(24).iterrows():
-                                seq = match_df[
-                                    (match_df['Index'] > win['Index']) &
-                                    (match_df['Index'] <= win['Index'] + 35) &
-                                    (match_df['Team'] == sel_team) &
-                                    (match_df['Type'].isin([1, 3]))
-                                ].sort_values('Index').head(4)
-                                if seq.empty:
-                                    continue
-                                color = palette[seq_count % len(palette)]
-                                seq_count += 1
-                                xs, ys = [], []
-                                for _, r in seq.iterrows():
-                                    xs.extend([r['x'], r['endX'], None])
-                                    ys.extend([r['y'], r['endY'], None])
-                                fig_ptl.add_trace(go.Scatter(
-                                    x=xs, y=ys, mode='lines',
-                                    line=dict(color=color, width=3),
-                                    name='Transition Shape' if seq_count == 1 else 'Transition Shape',
-                                    showlegend=(seq_count == 1),
-                                    hoverinfo='skip'
-                                ))
-                                fig_ptl.add_trace(go.Scatter(
-                                    x=seq['endX'], y=seq['endY'], mode='markers',
-                                    marker=dict(color=color, size=8, line=dict(color='white', width=1)),
-                                    showlegend=False,
-                                    customdata=np.column_stack([seq['Player'], seq['Minute']]),
-                                    hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<extra></extra>"
-                                ))
-
-                            if seq_count > 0:
-                                st.plotly_chart(fig_ptl, use_container_width=True)
-                            else:
-                                st.info("No ball-win transition sequences available in this range.")
-                            bw_leaders = ball_wins.groupby('Player').size().reset_index(name='Ball Wins').sort_values('Ball Wins', ascending=False)
-                            if not bw_leaders.empty:
-                                with st.expander("👥 Ball Win Leaders"):
-                                    fig_bwl = px.bar(bw_leaders.head(8).sort_values('Ball Wins'), x='Ball Wins', y='Player', orientation='h', template='plotly_dark')
-                                    fig_bwl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
-                                    st.plotly_chart(fig_bwl, use_container_width=True)
-
                         if "Time-to-Shot Scatter Plot" in modules:
                             st.subheader("⚡ Time-to-Shot Scatter Plot")
                             shots = plot_df[(plot_df['Type'].isin([13, 14, 15, 16])) & (plot_df['Outcome'] != 'Own Goal')].sort_values('Index')
@@ -1986,10 +1933,14 @@ for mgr_idx, manager in enumerate(managers):
                             _mc1, _mc2 = st.columns(2)
                             _mc1.metric("Ball Wins (transitions)", len(ball_wins_tm))
                             _mc2.metric("Players", ball_wins_tm['Player'].nunique() if not ball_wins_tm.empty else 0)
-                            st.caption("🔵 Transition passes · 🟡 Shots · ⭐ Goals — hover for player, minute & xG")
+                            st.caption("🔵 Transition passes (arrows = direction) · 🟡 Shots · ⭐ Goals — hover for player, minute & xG")
                             fig_tm = _make_plotly_pitch("Transition Map — 🔵 Passes · 🟡 Shots · ⭐ Goals")
-                            t_pass_xs, t_pass_ys = [], []
-                            t_shot_rows, t_goal_rows, trans_event_frames = [], [], []
+                            fig_tm.update_layout(
+                                legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5,
+                                            bgcolor='rgba(14,17,23,0.7)', bordercolor='#444', borderwidth=1),
+                                margin=dict(l=10, r=10, t=45, b=60),
+                            )
+                            t_pass_rows, t_carry_rows, t_shot_rows, t_goal_rows, trans_event_frames = [], [], [], [], []
                             for _, win in ball_wins_tm.iterrows():
                                 chain = match_df[
                                     (match_df['Index'] > win['Index']) &
@@ -2006,19 +1957,27 @@ for mgr_idx, manager in enumerate(managers):
                                 if chain.empty:
                                     continue
                                 trans_event_frames.append(chain)
-                                for _, p in chain[chain['Type'].isin([1, 3])].iterrows():
-                                    t_pass_xs.extend([p['x'], p['endX'], None])
-                                    t_pass_ys.extend([p['y'], p['endY'], None])
+                                for _, p in chain[chain['Type'] == 1].iterrows():
+                                    t_pass_rows.append(p)
+                                for _, p in chain[chain['Type'] == 3].iterrows():
+                                    t_carry_rows.append(p)
                                 for _, s in chain[chain['Type'].isin([13, 14, 15])].iterrows():
                                     t_shot_rows.append({'x': s['x'], 'y': s['y'], 'Player': s['Player'], 'Minute': int(s['Minute']), 'xG': round(float(s['xG']), 3)})
                                 for _, g in chain[(chain['Type'] == 16) & (chain['Outcome'] != 'Own Goal')].iterrows():
                                     t_goal_rows.append({'x': g['x'], 'y': g['y'], 'Player': g['Player'], 'Minute': int(g['Minute']), 'xG': round(float(g['xG']), 3)})
-                            if t_pass_xs:
-                                fig_tm.add_trace(go.Scatter(x=t_pass_xs, y=t_pass_ys, mode='lines', line=dict(color='#36d6e7', width=2), opacity=0.45, name='Transition Pass', hoverinfo='skip'))
+
+                            if t_pass_rows:
+                                _t_pass_df = pd.DataFrame(t_pass_rows)
+                                _t_pass_df['Outcome'] = _t_pass_df['Outcome'].fillna('Unknown')
+                                _add_plotly_action_lines(fig_tm, _t_pass_df, "🔵 Transition Pass", "#36d6e7", width=2, arrows=True)
+                            if t_carry_rows:
+                                _t_carry_df = pd.DataFrame(t_carry_rows)
+                                _t_carry_df['Outcome'] = _t_carry_df['Outcome'].fillna('Unknown')
+                                _add_plotly_action_lines(fig_tm, _t_carry_df, "🟣 Carry", "#a855f7", width=2)
                             if t_shot_rows:
                                 sdf_tm = pd.DataFrame(t_shot_rows)
                                 fig_tm.add_trace(go.Scatter(
-                                    x=sdf_tm['x'], y=sdf_tm['y'], mode='markers', name='Shot',
+                                    x=sdf_tm['x'], y=sdf_tm['y'], mode='markers', name='🟡 Shot',
                                     marker=dict(color='#ffd700', symbol='circle', size=12, line=dict(color='white', width=1)),
                                     customdata=np.column_stack([sdf_tm['Player'], sdf_tm['Minute'], sdf_tm['xG']]),
                                     hovertemplate="<b>%{customdata[0]}</b><br>Shot @ %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
@@ -2026,12 +1985,12 @@ for mgr_idx, manager in enumerate(managers):
                             if t_goal_rows:
                                 gdf_tm = pd.DataFrame(t_goal_rows)
                                 fig_tm.add_trace(go.Scatter(
-                                    x=gdf_tm['x'], y=gdf_tm['y'], mode='markers', name='Goal',
+                                    x=gdf_tm['x'], y=gdf_tm['y'], mode='markers', name='⭐ Goal',
                                     marker=dict(color='#00ff85', symbol='star', size=17, line=dict(color='white', width=1.5)),
                                     customdata=np.column_stack([gdf_tm['Player'], gdf_tm['Minute'], gdf_tm['xG']]),
                                     hovertemplate="<b>%{customdata[0]}</b> ⚽<br>Goal @ %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
                                 ))
-                            if t_pass_xs or t_shot_rows or t_goal_rows:
+                            if t_pass_rows or t_carry_rows or t_shot_rows or t_goal_rows:
                                 st.plotly_chart(fig_tm, use_container_width=True)
                                 if trans_event_frames:
                                     trans_all_df = pd.concat(trans_event_frames)
