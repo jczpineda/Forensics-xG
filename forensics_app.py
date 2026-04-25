@@ -2260,21 +2260,65 @@ for mgr_idx, manager in enumerate(managers):
                             st.subheader("🎯 Set Piece Targeting (Corners)")
                             corners = viz_df[(viz_df['Type'] == 1) & (viz_df['isCorner'])]
                             if not corners.empty:
-                                _mc1, _mc2, _mc3 = st.columns(3)
+                                # Find shots/goals following each corner (within 8 events, same team)
+                                _corn_shot_rows = []
+                                for _, _ck in corners.iterrows():
+                                    _follow = match_df[
+                                        (match_df['Index'] > _ck['Index']) &
+                                        (match_df['Index'] <= _ck['Index'] + 8) &
+                                        (match_df['Team'] == sel_team) &
+                                        (match_df['Type'].isin([13, 14, 15, 16]))
+                                    ].sort_values('Index')
+                                    for _, _s in _follow.iterrows():
+                                        _corn_shot_rows.append(_s)
+                                _corn_shots_df = pd.DataFrame(_corn_shot_rows).drop_duplicates(subset=['Index']) if _corn_shot_rows else pd.DataFrame()
+                                _n_ck_shots = len(_corn_shots_df) if not _corn_shots_df.empty else 0
+                                _n_ck_goals = len(_corn_shots_df[_corn_shots_df['Type'] == 16]) if not _corn_shots_df.empty else 0
+                                _mc1, _mc2, _mc3, _mc4, _mc5 = st.columns(5)
                                 _mc1.metric("Total Corners", len(corners))
                                 _mc2.metric("✅ Completed", len(corners[corners['Outcome'] == 'Successful']))
                                 _mc3.metric("❌ Incomplete", len(corners[corners['Outcome'] == 'Unsuccessful']))
+                                _mc4.metric("🟡 Shots from Corner", _n_ck_shots)
+                                _mc5.metric("⭐ Goals from Corner", _n_ck_goals)
                                 _corn_filter = st.multiselect(
                                     "🔍 Show actions on map:",
-                                    ["✅ Completed", "❌ Incomplete"],
-                                    default=["✅ Completed", "❌ Incomplete"],
+                                    ["✅ Completed", "❌ Incomplete", "🟡 Shot", "⭐ Goal"],
+                                    default=["✅ Completed", "❌ Incomplete", "🟡 Shot", "⭐ Goal"],
                                     key=f"corn_filter_{manager}"
                                 )
-                                fig_corners = _make_plotly_pitch("Corner Delivery — ✅ Completed · ❌ Incomplete")
+                                fig_corners = _make_plotly_pitch("Corner Delivery — ✅ Completed · ❌ Incomplete · 🟡 Shot · ⭐ Goal")
+                                fig_corners.update_layout(
+                                    legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5,
+                                                bgcolor='rgba(14,17,23,0.7)', bordercolor='#444', borderwidth=1),
+                                    margin=dict(l=10, r=10, t=45, b=60),
+                                )
                                 if "✅ Completed" in _corn_filter:
                                     _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Successful'], "✅ Completed Corner", "#00ffff", width=2, arrows=True)
                                 if "❌ Incomplete" in _corn_filter:
                                     _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Unsuccessful'], "❌ Incomplete Corner", "#ff4b4b", width=2, dash='dot', arrows=True)
+                                if not _corn_shots_df.empty:
+                                    _ck_shot_only = _corn_shots_df[_corn_shots_df['Type'].isin([13, 14, 15])]
+                                    _ck_goal_only = _corn_shots_df[_corn_shots_df['Type'] == 16]
+                                    if "🟡 Shot" in _corn_filter and not _ck_shot_only.empty:
+                                        fig_corners.add_trace(go.Scatter(
+                                            x=_ck_shot_only['x'], y=_ck_shot_only['y'], mode='markers',
+                                            name='🟡 Shot',
+                                            marker=dict(color='#ffd700', size=12, symbol='circle',
+                                                        line=dict(color='white', width=1.5)),
+                                            customdata=np.column_stack([_ck_shot_only['Player'], _ck_shot_only['Minute'],
+                                                                         _ck_shot_only['xG'].round(3)]),
+                                            hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
+                                        ))
+                                    if "⭐ Goal" in _corn_filter and not _ck_goal_only.empty:
+                                        fig_corners.add_trace(go.Scatter(
+                                            x=_ck_goal_only['x'], y=_ck_goal_only['y'], mode='markers',
+                                            name='⭐ Goal',
+                                            marker=dict(color='#00ff85', size=17, symbol='star',
+                                                        line=dict(color='white', width=1.5)),
+                                            customdata=np.column_stack([_ck_goal_only['Player'], _ck_goal_only['Minute'],
+                                                                         _ck_goal_only['xG'].round(3)]),
+                                            hovertemplate="<b>%{customdata[0]}</b> ⚽<br>Minute: %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
+                                        ))
                                 st.plotly_chart(fig_corners, use_container_width=True)
                                 corner_leaders = corners.groupby('Player').size().reset_index(name='Corners').sort_values('Corners', ascending=False)
                                 if not corner_leaders.empty:
@@ -2289,21 +2333,65 @@ for mgr_idx, manager in enumerate(managers):
                             st.subheader("🎯 Free Kick Targeting")
                             free_kicks = viz_df[(viz_df['Type'] == 1) & (viz_df['isFreeKick'])]
                             if not free_kicks.empty:
-                                _mc1, _mc2, _mc3 = st.columns(3)
+                                # Find shots/goals following each free kick (within 8 events, same team)
+                                _fk_shot_rows = []
+                                for _, _fkev in free_kicks.iterrows():
+                                    _follow = match_df[
+                                        (match_df['Index'] > _fkev['Index']) &
+                                        (match_df['Index'] <= _fkev['Index'] + 8) &
+                                        (match_df['Team'] == sel_team) &
+                                        (match_df['Type'].isin([13, 14, 15, 16]))
+                                    ].sort_values('Index')
+                                    for _, _s in _follow.iterrows():
+                                        _fk_shot_rows.append(_s)
+                                _fk_shots_df = pd.DataFrame(_fk_shot_rows).drop_duplicates(subset=['Index']) if _fk_shot_rows else pd.DataFrame()
+                                _n_fk_shots = len(_fk_shots_df) if not _fk_shots_df.empty else 0
+                                _n_fk_goals = len(_fk_shots_df[_fk_shots_df['Type'] == 16]) if not _fk_shots_df.empty else 0
+                                _mc1, _mc2, _mc3, _mc4, _mc5 = st.columns(5)
                                 _mc1.metric("Total Free Kicks", len(free_kicks))
                                 _mc2.metric("✅ Completed", len(free_kicks[free_kicks['Outcome'] == 'Successful']))
                                 _mc3.metric("Takers", free_kicks['Player'].nunique())
+                                _mc4.metric("🟡 Shots from FK", _n_fk_shots)
+                                _mc5.metric("⭐ Goals from FK", _n_fk_goals)
                                 _fk_filter = st.multiselect(
                                     "🔍 Show actions on map:",
-                                    ["✅ Completed", "❌ Incomplete"],
-                                    default=["✅ Completed", "❌ Incomplete"],
+                                    ["✅ Completed", "❌ Incomplete", "🟡 Shot", "⭐ Goal"],
+                                    default=["✅ Completed", "❌ Incomplete", "🟡 Shot", "⭐ Goal"],
                                     key=f"fk_filter_{manager}"
                                 )
-                                fig_fk = _make_plotly_pitch("Free-Kick Delivery — ✅ Completed · ❌ Incomplete")
+                                fig_fk = _make_plotly_pitch("Free-Kick Delivery — ✅ Completed · ❌ Incomplete · 🟡 Shot · ⭐ Goal")
+                                fig_fk.update_layout(
+                                    legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5,
+                                                bgcolor='rgba(14,17,23,0.7)', bordercolor='#444', borderwidth=1),
+                                    margin=dict(l=10, r=10, t=45, b=60),
+                                )
                                 if "✅ Completed" in _fk_filter:
                                     _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Successful'], "✅ Completed FK", "#00ffff", width=2, arrows=True)
                                 if "❌ Incomplete" in _fk_filter:
                                     _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Unsuccessful'], "❌ Incomplete FK", "#ff4b4b", width=2, dash='dot', arrows=True)
+                                if not _fk_shots_df.empty:
+                                    _fk_shot_only = _fk_shots_df[_fk_shots_df['Type'].isin([13, 14, 15])]
+                                    _fk_goal_only = _fk_shots_df[_fk_shots_df['Type'] == 16]
+                                    if "🟡 Shot" in _fk_filter and not _fk_shot_only.empty:
+                                        fig_fk.add_trace(go.Scatter(
+                                            x=_fk_shot_only['x'], y=_fk_shot_only['y'], mode='markers',
+                                            name='🟡 Shot',
+                                            marker=dict(color='#ffd700', size=12, symbol='circle',
+                                                        line=dict(color='white', width=1.5)),
+                                            customdata=np.column_stack([_fk_shot_only['Player'], _fk_shot_only['Minute'],
+                                                                         _fk_shot_only['xG'].round(3)]),
+                                            hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
+                                        ))
+                                    if "⭐ Goal" in _fk_filter and not _fk_goal_only.empty:
+                                        fig_fk.add_trace(go.Scatter(
+                                            x=_fk_goal_only['x'], y=_fk_goal_only['y'], mode='markers',
+                                            name='⭐ Goal',
+                                            marker=dict(color='#00ff85', size=17, symbol='star',
+                                                        line=dict(color='white', width=1.5)),
+                                            customdata=np.column_stack([_fk_goal_only['Player'], _fk_goal_only['Minute'],
+                                                                         _fk_goal_only['xG'].round(3)]),
+                                            hovertemplate="<b>%{customdata[0]}</b> ⚽<br>Minute: %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
+                                        ))
                                 st.plotly_chart(fig_fk, use_container_width=True)
                                 fk_leaders = free_kicks.groupby('Player').size().reset_index(name='Free Kicks').sort_values('Free Kicks', ascending=False)
                                 if not fk_leaders.empty:
