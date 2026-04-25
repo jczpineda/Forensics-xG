@@ -603,11 +603,11 @@ def _add_plotly_action_lines(fig, df, name, color, dash='solid', width=2, marker
     ])
 
     if arrows:
-        # Place an arrowhead marker 75% along each pass, angled in direction of travel
+        # Place an arrowhead marker at the endpoint of each line, angled in direction of travel
         _dx = (df['endX'] - df['x']).values
         _dy = (df['endY'] - df['y']).values
-        _arrow_x = df['x'].values + 0.75 * _dx
-        _arrow_y = df['y'].values + 0.75 * _dy
+        _arrow_x = df['endX'].values
+        _arrow_y = df['endY'].values
         # Plotly arrow marker: 0 = north, clockwise. atan2 gives CCW from east.
         _angles = (90 - np.degrees(np.arctan2(_dy, _dx))) % 360
         fig.add_trace(go.Scatter(
@@ -855,7 +855,7 @@ for mgr_idx, manager in enumerate(managers):
                             "Set Piece Targeting (Corners)", "Free Kick Targeting"
                         ]
                         gk_options = [
-                            "Shot Trajectory Map (GK View)", "Goal Kick Direction Map"
+                            "Shot Trajectory Map (GK View)"
                         ]
                         row1_c1, row1_c2, row1_c3 = st.columns(3)
                         with row1_c1:
@@ -2484,19 +2484,6 @@ for mgr_idx, manager in enumerate(managers):
                                         st.plotly_chart(fig_thl, use_container_width=True)
                             else:
                                 st.info("No opponent shots faced in this range.")
-
-                        if "Goal Kick Direction Map" in modules:
-                            st.subheader("🧤 Goal Kick Direction Map")
-                            gkicks = viz_df[viz_df['Type'] == 52]
-                            if not gkicks.empty:
-                                _mc1, _mc2 = st.columns(2)
-                                _mc1.metric("Goal Kicks", len(gkicks))
-                                _mc2.metric("Takers", gkicks['Player'].nunique())
-                                fig_gkd = _make_plotly_pitch("Goal Kick Direction and Target Zones")
-                                _add_plotly_action_lines(fig_gkd, gkicks, "Goal Kick", "#3b82f6", width=3, arrows=True)
-                                st.plotly_chart(fig_gkd, use_container_width=True)
-                            else:
-                                st.info("No goal kicks recorded in this range.")
 
                         st.divider()
 
