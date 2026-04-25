@@ -926,9 +926,17 @@ for mgr_idx, manager in enumerate(managers):
                             _mc2.metric("❌ Incomplete", _n_fail)
                             _mc3.metric("Accuracy", f"{_acc}%")
                             _mc4.metric("Players", succ_passes_df['Player'].nunique() if not succ_passes_df.empty else 0)
+                            _pm_filter = st.multiselect(
+                                "🔍 Show actions on map:",
+                                ["✅ Successful", "❌ Unsuccessful"],
+                                default=["✅ Successful", "❌ Unsuccessful"],
+                                key=f"pm_filter_{manager}"
+                            )
                             fig_pm = _make_plotly_pitch("Completed vs Failed Passes")
-                            _add_plotly_action_lines(fig_pm, succ_passes_df, "✅ Successful", "#00ff85", width=2, arrows=True)
-                            _add_plotly_action_lines(fig_pm, fail_passes_df, "❌ Unsuccessful", "#ff4b4b", width=2, dash='dot', arrows=True)
+                            if "✅ Successful" in _pm_filter:
+                                _add_plotly_action_lines(fig_pm, succ_passes_df, "✅ Successful", "#00ff85", width=2, arrows=True)
+                            if "❌ Unsuccessful" in _pm_filter:
+                                _add_plotly_action_lines(fig_pm, fail_passes_df, "❌ Unsuccessful", "#ff4b4b", width=2, dash='dot', arrows=True)
                             st.plotly_chart(fig_pm, use_container_width=True)
                             pass_leaders = succ_passes_df.groupby('Player').size().reset_index(name='Completed Passes').sort_values('Completed Passes', ascending=False)
                             fail_leaders = fail_passes_df.groupby('Player').size().reset_index(name='Unsuccessful Passes').sort_values('Unsuccessful Passes', ascending=False)
@@ -1039,10 +1047,16 @@ for mgr_idx, manager in enumerate(managers):
                                 _mc1.metric("🟡 High xT Passes", _n_hxt, help="Top 25% by xT value")
                                 _mc2.metric("🟠 Pre-Shot Passes", _n_ps)
                                 _mc3.metric("xT Threshold", f"{round(xT_thresh, 4)}")
+                                _hvp_filter = st.multiselect(
+                                    "🔍 Show actions on map:",
+                                    ["🟡 High xT Pass", "🟠 Pre-Shot Pass"],
+                                    default=["🟡 High xT Pass", "🟠 Pre-Shot Pass"],
+                                    key=f"hvp_filter_{manager}"
+                                )
                                 fig_hvp = _make_plotly_pitch("High Value Passes — 🟡 High xT · 🟠 Pre-Shot")
-                                if not high_xt.empty:
+                                if "🟡 High xT Pass" in _hvp_filter and not high_xt.empty:
                                     _add_plotly_action_lines(fig_hvp, high_xt, "🟡 High xT Pass", "#ffd700", width=2, arrows=True)
-                                if not pre_shot_df.empty:
+                                if "🟠 Pre-Shot Pass" in _hvp_filter and not pre_shot_df.empty:
                                     _add_plotly_action_lines(fig_hvp, pre_shot_df, "🟠 Pre-Shot Pass", "#ff7f50", width=3, arrows=True)
                                 st.plotly_chart(fig_hvp, use_container_width=True)
                                 all_hv = pd.concat([high_xt, pre_shot_df]).drop_duplicates(subset=['Index']) if not pre_shot_df.empty else high_xt
@@ -1187,6 +1201,12 @@ for mgr_idx, manager in enumerate(managers):
                                 _mc3.metric("❌ Unsuccessful", len(_unsuccessful))
                                 _mc4.metric("Completion %", f"{_pass_pct}%")
                                 _mc5.metric("Players", build_up['Player'].nunique())
+                                _arch_filter = st.multiselect(
+                                    "🔍 Show actions on map:",
+                                    ["🔵 Short Pass", "🟡 Long Pass", "🔴 Lost Pass"],
+                                    default=["🔵 Short Pass", "🟡 Long Pass", "🔴 Lost Pass"],
+                                    key=f"arch_filter_{manager}"
+                                )
                                 fig_arch = _make_plotly_pitch("The Architect — 🔵 Short · 🟡 Long · 🔴 Lost")
                                 # Zone grid dividers
                                 for xv in [33, 66]:
@@ -1203,11 +1223,11 @@ for mgr_idx, manager in enumerate(managers):
                                 for _lbl, _yc in [('Left', 16.5), ('Center', 50), ('Right', 83.5)]:
                                     fig_arch.add_annotation(x=1, y=_yc, text=_lbl, showarrow=False,
                                                             font=dict(color='rgba(255,255,255,0.4)', size=9), xanchor='left')
-                                if not _short.empty:
+                                if "🔵 Short Pass" in _arch_filter and not _short.empty:
                                     _add_plotly_action_lines(fig_arch, _short, "🔵 Short Pass", "#00ffff", width=2, arrows=True)
-                                if not _long.empty:
+                                if "🟡 Long Pass" in _arch_filter and not _long.empty:
                                     _add_plotly_action_lines(fig_arch, _long, "🟡 Long Pass", "#ffd700", width=2, arrows=True)
-                                if not _unsuccessful.empty:
+                                if "🔴 Lost Pass" in _arch_filter and not _unsuccessful.empty:
                                     _add_plotly_action_lines(fig_arch, _unsuccessful, "🔴 Lost Pass", "#ff4b4b", width=2, arrows=True)
                                 st.plotly_chart(fig_arch, use_container_width=True)
                                 zone_counts = build_up.groupby('Zone').size().reset_index(name='Passes').sort_values('Passes', ascending=False)
@@ -1288,6 +1308,12 @@ for mgr_idx, manager in enumerate(managers):
                                 _mc2.metric("🟠 Interceptions", _n_int)
                                 _mc3.metric("⬜ Clearances", _n_clr)
                                 _mc4.metric("🔴 Fouls", _n_foul)
+                                _dm_filter = st.multiselect(
+                                    "🔍 Show actions on map:",
+                                    ['Tackle', 'Interception', 'Clearance', 'Foul'],
+                                    default=['Tackle', 'Interception', 'Clearance', 'Foul'],
+                                    key=f"dm_filter_{manager}"
+                                )
                                 fig_dm = _make_plotly_pitch("Defensive Actions")
                                 for action, color, symbol in [
                                     ('Tackle', '#00a3ff', 'diamond'),
@@ -1295,6 +1321,8 @@ for mgr_idx, manager in enumerate(managers):
                                     ('Clearance', '#d1d5db', 'triangle-up'),
                                     ('Foul', '#ff4b4b', 'x')
                                 ]:
+                                    if action not in _dm_filter:
+                                        continue
                                     adf = def_map[def_map['Action'] == action]
                                     if adf.empty:
                                         continue
@@ -1469,8 +1497,16 @@ for mgr_idx, manager in enumerate(managers):
                                         'Interception':     ('#ff9900', 'dot',    2, False),
                                         'Tackle Won':       ('#00a3ff', 'dot',    2, False),
                                     }
+                                    _pre_filter = st.multiselect(
+                                        "🔍 Show actions on map:",
+                                        list(_action_styles.keys()),
+                                        default=list(_action_styles.keys()),
+                                        key=f"pre_filter_{manager}"
+                                    )
                                     fig_pre = _make_plotly_pitch("Actions That Led to Shots — 🔵 Pass · 🟣 Dribble · 🟠 Interception · 🔷 Tackle")
                                     for _lbl, (_col, _dash, _w, _arr) in _action_styles.items():
+                                        if _lbl not in _pre_filter:
+                                            continue
                                         _sub = _pre_df[_pre_df['ActionLabel'] == _lbl]
                                         if not _sub.empty:
                                             _add_plotly_action_lines(fig_pre, _sub, _lbl, _col, dash=_dash, width=_w, arrows=_arr)
@@ -2088,9 +2124,17 @@ for mgr_idx, manager in enumerate(managers):
                                 _mc1.metric("Total Corners", len(corners))
                                 _mc2.metric("✅ Completed", len(corners[corners['Outcome'] == 'Successful']))
                                 _mc3.metric("❌ Incomplete", len(corners[corners['Outcome'] == 'Unsuccessful']))
+                                _corn_filter = st.multiselect(
+                                    "🔍 Show actions on map:",
+                                    ["✅ Completed", "❌ Incomplete"],
+                                    default=["✅ Completed", "❌ Incomplete"],
+                                    key=f"corn_filter_{manager}"
+                                )
                                 fig_corners = _make_plotly_pitch("Corner Delivery — ✅ Completed · ❌ Incomplete")
-                                _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Successful'], "✅ Completed Corner", "#00ffff", width=2, arrows=True)
-                                _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Unsuccessful'], "❌ Incomplete Corner", "#ff4b4b", width=2, dash='dot', arrows=True)
+                                if "✅ Completed" in _corn_filter:
+                                    _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Successful'], "✅ Completed Corner", "#00ffff", width=2, arrows=True)
+                                if "❌ Incomplete" in _corn_filter:
+                                    _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Unsuccessful'], "❌ Incomplete Corner", "#ff4b4b", width=2, dash='dot', arrows=True)
                                 st.plotly_chart(fig_corners, use_container_width=True)
                                 corner_leaders = corners.groupby('Player').size().reset_index(name='Corners').sort_values('Corners', ascending=False)
                                 if not corner_leaders.empty:
@@ -2109,9 +2153,17 @@ for mgr_idx, manager in enumerate(managers):
                                 _mc1.metric("Total Free Kicks", len(free_kicks))
                                 _mc2.metric("✅ Completed", len(free_kicks[free_kicks['Outcome'] == 'Successful']))
                                 _mc3.metric("Takers", free_kicks['Player'].nunique())
+                                _fk_filter = st.multiselect(
+                                    "🔍 Show actions on map:",
+                                    ["✅ Completed", "❌ Incomplete"],
+                                    default=["✅ Completed", "❌ Incomplete"],
+                                    key=f"fk_filter_{manager}"
+                                )
                                 fig_fk = _make_plotly_pitch("Free-Kick Delivery — ✅ Completed · ❌ Incomplete")
-                                _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Successful'], "✅ Completed FK", "#00ffff", width=2, arrows=True)
-                                _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Unsuccessful'], "❌ Incomplete FK", "#ff4b4b", width=2, dash='dot', arrows=True)
+                                if "✅ Completed" in _fk_filter:
+                                    _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Successful'], "✅ Completed FK", "#00ffff", width=2, arrows=True)
+                                if "❌ Incomplete" in _fk_filter:
+                                    _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Unsuccessful'], "❌ Incomplete FK", "#ff4b4b", width=2, dash='dot', arrows=True)
                                 st.plotly_chart(fig_fk, use_container_width=True)
                                 fk_leaders = free_kicks.groupby('Player').size().reset_index(name='Free Kicks').sort_values('Free Kicks', ascending=False)
                                 if not fk_leaders.empty:
