@@ -836,7 +836,9 @@ for mgr_idx, manager in enumerate(managers):
                             "The Architect (Build-Up Phase)", "Passing Network (Structure)"
                         ]
                         out_pos_options = [
-                            "Defensive Actions Map", "Defensive Shield (Heatmap + Line)"
+                            "Defensive Actions Map", "Defensive Shield (Heatmap + Line)",
+                            "Avg Defensive vs Opposition Offensive Positions",
+                            "Expected Threat Conceded Map"
                         ]
                         attacking_phase_options = [
                             "Actions Leading to Shots",
@@ -1417,6 +1419,136 @@ for mgr_idx, manager in enumerate(managers):
                                         st.plotly_chart(fig_dsl, use_container_width=True)
                             else:
                                 st.info("No defensive actions to render.")
+
+                        if "Avg Defensive vs Opposition Offensive Positions" in modules:
+                            st.subheader("🔴 Average Defensive Position vs. Opposition's Average Offensive Position")
+                            # sel_team defensive events (already in sel_team's coordinate frame)
+                            _adp_def_evts = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
+                            # opp_team offensive events — flip coordinates into sel_team's frame
+                            _adp_opp_raw = match_df[
+                                (match_df['Team'] == opp_team) &
+                                (match_df['Type'].isin([1, 3]))
+                            ].copy()
+                            _adp_opp_raw['x'] = 100 - _adp_opp_raw['x']
+                            _adp_opp_raw['y'] = 100 - _adp_opp_raw['y']
+                            _adp_opp_evts = _adp_opp_raw[
+                                (_adp_opp_raw['Minute'] >= min_range[0]) &
+                                (_adp_opp_raw['Minute'] <= min_range[1])
+                            ]
+                            _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                            _mc1.metric(f"🔵 {sel_team} Def. Actions", len(_adp_def_evts))
+                            _mc2.metric(f"🟠 {opp_team} Att. Actions", len(_adp_opp_evts))
+                            _mc3.metric(f"{sel_team} Players", _adp_def_evts['Player'].nunique() if not _adp_def_evts.empty else 0)
+                            _mc4.metric(f"{opp_team} Players", _adp_opp_evts['Player'].nunique() if not _adp_opp_evts.empty else 0)
+                            fig_adp = _make_plotly_pitch(f"{sel_team} 🛡 Defence  vs.  {opp_team} ⚔ Attack")
+                            if not _adp_def_evts.empty:
+                                _def_avg = _adp_def_evts.groupby('Player')[['x', 'y']].mean().reset_index()
+                                _def_cnts = _adp_def_evts.groupby('Player').size().reset_index(name='Actions')
+                                _def_avg = _def_avg.merge(_def_cnts, on='Player')
+                                _node_sd = np.clip(_def_avg['Actions'] * 1.5, 10, 35)
+                                fig_adp.add_trace(go.Scatter(
+                                    x=_def_avg['x'], y=_def_avg['y'], mode='markers+text',
+                                    name=f'🔵 {sel_team} Defence',
+                                    marker=dict(size=_node_sd, color='#00a3ff', opacity=0.85, symbol='diamond', line=dict(color='white', width=1.5)),
+                                    text=_def_avg['Player'].str.split(' ').str[-1],
+                                    textposition='top center', textfont=dict(color='#00a3ff', size=9),
+                                    customdata=np.column_stack([_def_avg['Player'], _def_avg['Actions']]),
+                                    hovertemplate="<b>%{customdata[0]}</b><br>Avg Defensive Pos<br>Actions: %{customdata[1]}<extra></extra>"
+                                ))
+                            if not _adp_opp_evts.empty:
+                                _opp_avg = _adp_opp_evts.groupby('Player')[['x', 'y']].mean().reset_index()
+                                _opp_cnts = _adp_opp_evts.groupby('Player').size().reset_index(name='Actions')
+                                _opp_avg = _opp_avg.merge(_opp_cnts, on='Player')
+                                _node_so = np.clip(_opp_avg['Actions'] * 1.5, 10, 35)
+                                fig_adp.add_trace(go.Scatter(
+                                    x=_opp_avg['x'], y=_opp_avg['y'], mode='markers+text',
+                                    name=f'🟠 {opp_team} Attack',
+                                    marker=dict(size=_node_so, color='#ff9900', opacity=0.85, line=dict(color='white', width=1.5)),
+                                    text=_opp_avg['Player'].str.split(' ').str[-1],
+                                    textposition='bottom center', textfont=dict(color='#ff9900', size=9),
+                                    customdata=np.column_stack([_opp_avg['Player'], _opp_avg['Actions']]),
+                                    hovertemplate="<b>%{customdata[0]}</b><br>Avg Attack Pos<br>Actions: %{customdata[1]}<extra></extra>"
+                                ))
+                            st.plotly_chart(fig_adp, use_container_width=True)
+                            _exp1, _exp2 = st.columns(2)
+                            with _exp1:
+                                if not _adp_def_evts.empty:
+                                    _adp_def_leaders = _adp_def_evts.groupby('Player').size().reset_index(name='Defensive Actions').sort_values('Defensive Actions', ascending=False)
+                                    with st.expander(f"👥 {sel_team} Defensive Leaders"):
+                                        fig_adpl = px.bar(_adp_def_leaders.head(8).sort_values('Defensive Actions'), x='Defensive Actions', y='Player', orientation='h', template='plotly_dark', color_discrete_sequence=['#00a3ff'])
+                                        fig_adpl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_adpl, use_container_width=True)
+                            with _exp2:
+                                if not _adp_opp_evts.empty:
+                                    _adp_opp_leaders = _adp_opp_evts.groupby('Player').size().reset_index(name='Attacking Actions').sort_values('Attacking Actions', ascending=False)
+                                    with st.expander(f"👥 {opp_team} Attacking Leaders"):
+                                        fig_aopl = px.bar(_adp_opp_leaders.head(8).sort_values('Attacking Actions'), x='Attacking Actions', y='Player', orientation='h', template='plotly_dark', color_discrete_sequence=['#ff9900'])
+                                        fig_aopl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_aopl, use_container_width=True)
+
+                        if "Expected Threat Conceded Map" in modules:
+                            st.subheader("🔴 Expected Threat Conceded Map")
+                            st.caption("Cells show how much xT the opposition generated against you — brighter = higher threat conceded in that zone")
+                            # opp_team successful passes/carries with positive xT, flipped into sel_team's frame
+                            _xtc_raw = match_df[
+                                (match_df['Team'] == opp_team) &
+                                (match_df['Type'].isin([1, 3])) &
+                                (match_df['Outcome'] == 'Successful') &
+                                (match_df['xT_Added'] > 0)
+                            ].copy()
+                            _xtc_raw['x'] = 100 - _xtc_raw['x']
+                            _xtc_raw['y'] = 100 - _xtc_raw['y']
+                            _xtc_acts = _xtc_raw[
+                                (_xtc_raw['Minute'] >= min_range[0]) &
+                                (_xtc_raw['Minute'] <= min_range[1])
+                            ]
+                            if not _xtc_acts.empty:
+                                _xtc_total = round(_xtc_acts['xT_Added'].sum(), 3)
+                                _xtc_n = len(_xtc_acts)
+                                _xtc_ply = _xtc_acts['Player'].nunique()
+                                _mc1, _mc2, _mc3 = st.columns(3)
+                                _mc1.metric("Total xT Conceded", _xtc_total)
+                                _mc2.metric("Threatening Actions", _xtc_n)
+                                _mc3.metric(f"{opp_team} Players Involved", _xtc_ply)
+                                fig_xtc = _make_plotly_pitch("xT Conceded — cell value = xT given away, brighter = higher threat")
+                                _xbins_c = np.linspace(0, 100, 13)
+                                _ybins_c = np.linspace(0, 100, 9)
+                                _z_c, _xedges_c, _yedges_c = np.histogram2d(
+                                    _xtc_acts['x'].values,
+                                    _xtc_acts['y'].values,
+                                    bins=[_xbins_c, _ybins_c],
+                                    weights=_xtc_acts['xT_Added'].values
+                                )
+                                _x_centers_c = (_xedges_c[:-1] + _xedges_c[1:]) / 2
+                                _y_centers_c = (_yedges_c[:-1] + _yedges_c[1:]) / 2
+                                fig_xtc.add_trace(go.Heatmap(
+                                    x=_x_centers_c,
+                                    y=_y_centers_c,
+                                    z=_z_c.T,
+                                    colorscale='Inferno',
+                                    opacity=0.75,
+                                    showscale=True,
+                                    colorbar=dict(title='xT Conceded')
+                                ))
+                                for _xi, _xv in enumerate(_x_centers_c):
+                                    for _yi, _yv in enumerate(_y_centers_c):
+                                        _val = _z_c[_xi, _yi]
+                                        if _val > 0.001:
+                                            fig_xtc.add_annotation(
+                                                x=float(_xv), y=float(_yv),
+                                                text=f"{_val:.3f}",
+                                                showarrow=False,
+                                                font=dict(color='white', size=9)
+                                            )
+                                st.plotly_chart(fig_xtc, use_container_width=True)
+                                _xtc_leaders = _xtc_acts.groupby('Player')['xT_Added'].sum().reset_index(name='xT Conceded').sort_values('xT Conceded', ascending=False)
+                                if not _xtc_leaders.empty:
+                                    with st.expander(f"👥 {opp_team} xT Leaders (Threat Generators)"):
+                                        fig_xtcl = px.bar(_xtc_leaders.head(8).sort_values('xT Conceded'), x='xT Conceded', y='Player', orientation='h', template='plotly_dark', color_discrete_sequence=['#ff4b4b'])
+                                        fig_xtcl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_xtcl, use_container_width=True)
+                            else:
+                                st.info("No xT conceded data available for current filters.")
 
                         # --- Attacking Phase ---
                         if "Actions Leading to Shots" in modules:
