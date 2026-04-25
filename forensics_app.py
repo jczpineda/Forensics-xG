@@ -1565,6 +1565,11 @@ for mgr_idx, manager in enumerate(managers):
 
                             # Pitch map
                             fig_l_zones = _make_plotly_pitch("Zone 14 🟡 · Left Half-Space 🔴 · Right Half-Space 🔴")
+                            fig_l_zones.update_layout(
+                                legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5,
+                                            bgcolor='rgba(14,17,23,0.7)', bordercolor='#444', borderwidth=1),
+                                margin=dict(l=10, r=10, t=45, b=60),
+                            )
                             for _zlbl, xmin, xmax, ymin, ymax, zcolor in _zone_defs:
                                 fig_l_zones.add_shape(
                                     type='rect', x0=xmin, y0=ymin, x1=xmax, y1=ymax,
