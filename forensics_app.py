@@ -1140,6 +1140,11 @@ for mgr_idx, manager in enumerate(managers):
                                     (build_up['endX'] - build_up['x'])**2 + (build_up['endY'] - build_up['y'])**2
                                 )
                                 build_up['Length'] = np.where(build_up['dist'] > 25, 'Long', 'Short')
+                                build_up['Outcome'] = build_up['Outcome'].fillna('Unknown')
+                                _successful = build_up[build_up['Outcome'] == 'Successful']
+                                _unsuccessful = build_up[build_up['Outcome'] != 'Successful']
+                                _short = _successful[_successful['Length'] == 'Short']
+                                _long = _successful[_successful['Length'] == 'Long']
                                 build_up['TargetThird'] = pd.cut(
                                     build_up['endX'], bins=[0, 33, 66, 100],
                                     labels=['Own Third', 'Middle Third', 'Attacking Third'], include_lowest=True
@@ -1149,14 +1154,14 @@ for mgr_idx, manager in enumerate(managers):
                                     labels=['Left', 'Center', 'Right'], include_lowest=True
                                 )
                                 build_up['Zone'] = build_up['TargetThird'].astype(str) + ' — ' + build_up['TargetChannel'].astype(str)
-                                _short = build_up[build_up['Length'] == 'Short']
-                                _long = build_up[build_up['Length'] == 'Long']
-                                _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                                _pass_pct = round(len(_successful) / len(build_up) * 100, 1) if len(build_up) > 0 else 0
+                                _mc1, _mc2, _mc3, _mc4, _mc5 = st.columns(5)
                                 _mc1.metric("Build-Up Passes", len(build_up))
-                                _mc2.metric("🔵 Short (≤25 u)", len(_short))
-                                _mc3.metric("🟡 Long (>25 u)", len(_long))
-                                _mc4.metric("Players", build_up['Player'].nunique())
-                                fig_arch = _make_plotly_pitch("The Architect — 🔵 Short Pass · 🟡 Long Pass")
+                                _mc2.metric("✅ Successful", len(_successful))
+                                _mc3.metric("❌ Unsuccessful", len(_unsuccessful))
+                                _mc4.metric("Completion %", f"{_pass_pct}%")
+                                _mc5.metric("Players", build_up['Player'].nunique())
+                                fig_arch = _make_plotly_pitch("The Architect — 🔵 Short · 🟡 Long · 🔴 Lost")
                                 # Zone grid dividers
                                 for xv in [33, 66]:
                                     fig_arch.add_shape(type='line', x0=xv, y0=0, x1=xv, y1=100,
@@ -1176,6 +1181,8 @@ for mgr_idx, manager in enumerate(managers):
                                     _add_plotly_action_lines(fig_arch, _short, "🔵 Short Pass", "#00ffff", width=2)
                                 if not _long.empty:
                                     _add_plotly_action_lines(fig_arch, _long, "🟡 Long Pass", "#ffd700", width=2)
+                                if not _unsuccessful.empty:
+                                    _add_plotly_action_lines(fig_arch, _unsuccessful, "🔴 Lost Pass", "#ff4b4b", width=2)
                                 st.plotly_chart(fig_arch, use_container_width=True)
                                 zone_counts = build_up.groupby('Zone').size().reset_index(name='Passes').sort_values('Passes', ascending=False)
                                 with st.expander("📊 Zone Breakdown & Build-Up Leaders"):
