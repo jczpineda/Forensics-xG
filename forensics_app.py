@@ -1563,6 +1563,14 @@ for mgr_idx, manager in enumerate(managers):
                             _mc3.metric("🟣 Dribbles into Zones", len(_z_carries))
                             _mc4.metric("🎯 Shots from Zones", len(_z_shots))
 
+                            # Action filter
+                            _z14_filter = st.multiselect(
+                                "🔍 Show actions on map:",
+                                ["Pass ✅", "Pass ❌", "Dribble ✅", "Dribble ❌", "Shots"],
+                                default=["Pass ✅", "Pass ❌", "Dribble ✅", "Dribble ❌", "Shots"],
+                                key=f"z14_filter_{manager}"
+                            )
+
                             # Pitch map
                             fig_l_zones = _make_plotly_pitch("Zone 14 🟡 · Left Half-Space 🔴 · Right Half-Space 🔴")
                             fig_l_zones.update_layout(
@@ -1575,15 +1583,15 @@ for mgr_idx, manager in enumerate(managers):
                                     type='rect', x0=xmin, y0=ymin, x1=xmax, y1=ymax,
                                     line=dict(color='white', width=1), fillcolor=zcolor, opacity=0.15
                                 )
-                            if not _z_pass_succ.empty:
+                            if "Pass ✅" in _z14_filter and not _z_pass_succ.empty:
                                 _add_plotly_action_lines(fig_l_zones, _z_pass_succ, "✅ Pass (Successful)", "#00ff85", width=2, arrows=True)
-                            if not _z_pass_fail.empty:
+                            if "Pass ❌" in _z14_filter and not _z_pass_fail.empty:
                                 _add_plotly_action_lines(fig_l_zones, _z_pass_fail, "❌ Pass (Unsuccessful)", "#ff4b4b", width=2, dash='dot', arrows=True)
-                            if not _z_carry_succ.empty:
+                            if "Dribble ✅" in _z14_filter and not _z_carry_succ.empty:
                                 _add_plotly_action_lines(fig_l_zones, _z_carry_succ, "🟣 Dribble (Successful)", "#a855f7", width=2)
-                            if not _z_carry_fail.empty:
+                            if "Dribble ❌" in _z14_filter and not _z_carry_fail.empty:
                                 _add_plotly_action_lines(fig_l_zones, _z_carry_fail, "⚠️ Dribble (Unsuccessful)", "#ff9900", width=2, dash='dot')
-                            if not _z_shots.empty:
+                            if "Shots" in _z14_filter and not _z_shots.empty:
                                 _shot_type_sym = {16: 'star', 13: 'circle', 14: 'square', 15: 'x'}
                                 _z_shot_sym = _z_shots['Type'].map(_shot_type_sym).fillna('circle').tolist()
                                 _z_shot_custom = np.column_stack([
@@ -1712,6 +1720,14 @@ for mgr_idx, manager in enumerate(managers):
                                     _all_inv_players.update(_d['Player'].unique())
                             _mc4.metric("👤 Players", len(_all_inv_players))
 
+                            # Action filter
+                            _zi_filter = st.multiselect(
+                                "🔍 Show actions on map:",
+                                ["Pass ✅", "Pass ❌", "Dribble ✅", "Dribble ❌", "Shots"],
+                                default=["Pass ✅", "Pass ❌", "Dribble ✅", "Dribble ❌", "Shots"],
+                                key=f"zi_filter_{manager}"
+                            )
+
                             fig_zi = _make_plotly_pitch("Zone Invasions — 🟡 Final Third · 🔴 Box Entries")
                             fig_zi.update_layout(
                                 legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5,
@@ -1726,25 +1742,25 @@ for mgr_idx, manager in enumerate(managers):
                                             fillcolor='rgba(255,75,75,0.07)')
 
                             # Passes — arrows
-                            if not _inv_ft_pass_s.empty:
+                            if "Pass ✅" in _zi_filter and not _inv_ft_pass_s.empty:
                                 _add_plotly_action_lines(fig_zi, _inv_ft_pass_s,  "✅ Pass → Final Third",  "#00ff85", width=2, arrows=True)
-                            if not _inv_ft_pass_f.empty:
+                            if "Pass ❌" in _zi_filter and not _inv_ft_pass_f.empty:
                                 _add_plotly_action_lines(fig_zi, _inv_ft_pass_f,  "❌ Pass → Final Third",  "#ff4b4b", width=2, dash='dot', arrows=True)
-                            if not _inv_box_pass_s.empty:
+                            if "Pass ✅" in _zi_filter and not _inv_box_pass_s.empty:
                                 _add_plotly_action_lines(fig_zi, _inv_box_pass_s, "✅ Pass → Box",          "#ffd700", width=2, arrows=True)
-                            if not _inv_box_pass_f.empty:
+                            if "Pass ❌" in _zi_filter and not _inv_box_pass_f.empty:
                                 _add_plotly_action_lines(fig_zi, _inv_box_pass_f, "❌ Pass → Box",          "#ff9900", width=2, dash='dot', arrows=True)
                             # Dribbles — solid/dotted lines
-                            if not _inv_ft_carry_s.empty:
+                            if "Dribble ✅" in _zi_filter and not _inv_ft_carry_s.empty:
                                 _add_plotly_action_lines(fig_zi, _inv_ft_carry_s,  "🟣 Dribble → Final Third ✅", "#a855f7", width=2)
-                            if not _inv_ft_carry_f.empty:
+                            if "Dribble ❌" in _zi_filter and not _inv_ft_carry_f.empty:
                                 _add_plotly_action_lines(fig_zi, _inv_ft_carry_f,  "⚠️ Dribble → Final Third ❌", "#c084fc", width=2, dash='dot')
-                            if not _inv_box_carry_s.empty:
+                            if "Dribble ✅" in _zi_filter and not _inv_box_carry_s.empty:
                                 _add_plotly_action_lines(fig_zi, _inv_box_carry_s, "🟣 Dribble → Box ✅",         "#e879f9", width=2)
-                            if not _inv_box_carry_f.empty:
+                            if "Dribble ❌" in _zi_filter and not _inv_box_carry_f.empty:
                                 _add_plotly_action_lines(fig_zi, _inv_box_carry_f, "⚠️ Dribble → Box ❌",         "#f0abfc", width=2, dash='dot')
                             # Shots
-                            if not _inv_shots_all.empty:
+                            if "Shots" in _zi_filter and not _inv_shots_all.empty:
                                 _inv_shot_sym_map = {16: 'star', 13: 'circle', 14: 'square', 15: 'x'}
                                 _inv_shot_syms = _inv_shots_all['Type'].map(_inv_shot_sym_map).fillna('circle').tolist()
                                 _inv_shot_custom = np.column_stack([
