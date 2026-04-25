@@ -813,7 +813,7 @@ for mgr_idx, manager in enumerate(managers):
                         in_pos_options = [
                             "Progressive Passes Map", "Pass Map", "Passing Heatmap",
                             "Expected Threat (xT) Grid", "High Value Pass Map",
-                            "Average Attacking & Defending Positions", "Match Progression",
+                            "Match Progression",
                             "The Architect (Build-Up Phase)", "Passing Network (Structure)"
                         ]
                         out_pos_options = [
@@ -821,7 +821,8 @@ for mgr_idx, manager in enumerate(managers):
                         ]
                         attacking_phase_options = [
                             "Actions Leading to Shots", "Creator Map (Shot Assists)",
-                            "Zone 14 & Half-Spaces", "Zone Invasions"
+                            "Zone 14 & Half-Spaces", "Zone Invasions",
+                            "Average Attacking & Defending Positions"
                         ]
                         att_trans_options = [
                             "Progression Trajectory Lines", "Time-to-Shot Scatter Plot", "Transition Map"
