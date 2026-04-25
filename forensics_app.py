@@ -559,7 +559,18 @@ def _make_plotly_pitch(title):
         font=dict(color='white'),
         margin=dict(l=10, r=10, t=45, b=10),
         height=520,
-        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="center", x=0.5)
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="center", x=0.5,
+                    bgcolor='rgba(14,17,23,0.7)', bordercolor='#444', borderwidth=1)
+    )
+    # Attack direction arrow (left goal → right goal)
+    fig.add_annotation(
+        x=80, y=-1.2, ax=20, ay=-1.2,
+        text="Attack Direction",
+        showarrow=True, arrowhead=3, arrowwidth=2,
+        arrowcolor='rgba(255,255,255,0.5)',
+        font=dict(color='rgba(255,255,255,0.5)', size=10),
+        xref='x', yref='y', axref='x', ayref='y',
     )
     return fig
 
@@ -801,16 +812,16 @@ for mgr_idx, manager in enumerate(managers):
 
                         in_pos_options = [
                             "Progressive Passes Map", "Passes into Zone 14", "Pass Map", "Passing Heatmap",
-                            "Expected Threat (xT) Grid (Legacy)", "High Value Pass Map",
+                            "Expected Threat (xT) Grid", "High Value Pass Map",
                             "Average Attacking & Defending Positions", "Match Progression"
                         ]
                         out_pos_options = [
                             "Defensive Actions Map", "Defensive Shield (Heatmap + Line)",
-                            "Defensive Actions (Legacy)"
+                            "Defensive Actions"
                         ]
                         attacking_phase_options = [
-                            "Actions Leading to Shots (Legacy)", "Creator Map (Shot Assists) (Legacy)",
-                            "Zone 14 & Half-Spaces (Legacy)", "Zone Invasions"
+                            "Actions Leading to Shots", "Creator Map (Shot Assists)",
+                            "Zone 14 & Half-Spaces", "Zone Invasions"
                         ]
                         att_trans_options = [
                             "Progression Trajectory Lines", "Time-to-Shot Scatter Plot", "Transition Map"
@@ -825,8 +836,8 @@ for mgr_idx, manager in enumerate(managers):
                             "Shot Trajectory Map (GK View)", "Goal Kick Direction Map"
                         ]
                         legacy_options = [
-                            "The Architect (Build-Up Phase) (Legacy)",
-                            "Passing Network (Structure) (Legacy)"
+                            "The Architect (Build-Up Phase)",
+                            "Passing Network (Structure)"
                         ]
 
                         row1_c1, row1_c2, row1_c3 = st.columns(3)
@@ -849,9 +860,9 @@ for mgr_idx, manager in enumerate(managers):
                         with row3_c1:
                             gk_mods = st.multiselect("🧤 Goalkeeping", gk_options, key=f"mgk_{manager}")
                         with row3_c2:
-                            legacy_mods = st.multiselect("🧭 Legacy Telemetry", legacy_options, key=f"mlg_{manager}")
+                            legacy_mods = st.multiselect("🧭 Classic Telemetry", legacy_options, key=f"mlg_{manager}")
                         with row3_c3:
-                            st.caption("Legacy maps now live inside Evidence Layers.")
+                            st.caption("Classic maps now live inside Evidence Layers.")
 
                         modules = in_pos_mods + out_pos_mods + attacking_phase_mods + att_trans_mods + def_trans_mods + set_mods + gk_mods + legacy_mods
 
@@ -877,6 +888,13 @@ for mgr_idx, manager in enumerate(managers):
                         # --- In-Possession ---
                         if "Progressive Passes Map" in modules:
                             st.subheader("🟢 Progressive Passes Map")
+                            _n_pp = len(prog_passes)
+                            _pp_ply = prog_passes['Player'].nunique() if not prog_passes.empty else 0
+                            _pp_dist = round((prog_passes['endX'] - prog_passes['x']).mean(), 1) if not prog_passes.empty else 0
+                            _mc1, _mc2, _mc3 = st.columns(3)
+                            _mc1.metric("Progressive Passes", _n_pp)
+                            _mc2.metric("Players Involved", _pp_ply)
+                            _mc3.metric("Avg Forward Distance", f"{_pp_dist} u")
                             fig_pp = _make_plotly_pitch(f"{sel_team} Progressive Passes")
                             _add_plotly_action_lines(fig_pp, prog_passes, "Progressive Pass", "#00ff85", width=2)
                             st.plotly_chart(fig_pp, use_container_width=True)
@@ -888,6 +906,13 @@ for mgr_idx, manager in enumerate(managers):
 
                         if "Passes into Zone 14" in modules:
                             st.subheader("🟢 Passes into Zone 14")
+                            _n_z14 = len(zone14_passes)
+                            _z14_ply = zone14_passes['Player'].nunique() if not zone14_passes.empty else 0
+                            _z14_succ = len(zone14_passes[zone14_passes['Outcome'] == 'Successful']) if not zone14_passes.empty else 0
+                            _mc1, _mc2, _mc3 = st.columns(3)
+                            _mc1.metric("Zone 14 Passes", _n_z14)
+                            _mc2.metric("Players Involved", _z14_ply)
+                            _mc3.metric("Completed", _z14_succ)
                             fig_z14 = _make_plotly_pitch("Entries Into Zone 14")
                             fig_z14.add_shape(type='rect', x0=65, y0=37, x1=85, y1=63, line=dict(color='#ffd700', width=2), fillcolor='rgba(255,215,0,0.15)')
                             _add_plotly_action_lines(fig_z14, zone14_passes, "Zone 14 Entry", "#ffd700", width=3)
@@ -900,11 +925,18 @@ for mgr_idx, manager in enumerate(managers):
 
                         if "Pass Map" in modules:
                             st.subheader("🟢 Pass Map")
-                            fig_pm = _make_plotly_pitch("Completed vs Failed Passes")
                             succ_passes_df = viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful')]
                             fail_passes_df = viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Unsuccessful')]
-                            _add_plotly_action_lines(fig_pm, succ_passes_df, "Successful", "#00ff85", width=2)
-                            _add_plotly_action_lines(fig_pm, fail_passes_df, "Unsuccessful", "#ff4b4b", width=2, dash='dot')
+                            _n_succ = len(succ_passes_df); _n_fail = len(fail_passes_df)
+                            _acc = round(_n_succ / (_n_succ + _n_fail) * 100, 1) if (_n_succ + _n_fail) > 0 else 0
+                            _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                            _mc1.metric("✅ Completed", _n_succ)
+                            _mc2.metric("❌ Incomplete", _n_fail)
+                            _mc3.metric("Accuracy", f"{_acc}%")
+                            _mc4.metric("Players", succ_passes_df['Player'].nunique() if not succ_passes_df.empty else 0)
+                            fig_pm = _make_plotly_pitch("Completed vs Failed Passes")
+                            _add_plotly_action_lines(fig_pm, succ_passes_df, "✅ Successful", "#00ff85", width=2)
+                            _add_plotly_action_lines(fig_pm, fail_passes_df, "❌ Unsuccessful", "#ff4b4b", width=2, dash='dot')
                             st.plotly_chart(fig_pm, use_container_width=True)
                             pass_leaders = succ_passes_df.groupby('Player').size().reset_index(name='Completed Passes').sort_values('Completed Passes', ascending=False)
                             if not pass_leaders.empty:
@@ -917,11 +949,17 @@ for mgr_idx, manager in enumerate(managers):
                             st.subheader("🟢 Passing Heatmap")
                             pass_heat = viz_df[viz_df['Type'] == 1]
                             if not pass_heat.empty:
-                                fig_ph = _make_plotly_pitch("Pass Origin Density")
+                                _n_ph = len(pass_heat); _ph_ply = pass_heat['Player'].nunique()
+                                _ph_succ = len(pass_heat[pass_heat['Outcome'] == 'Successful'])
+                                _mc1, _mc2, _mc3 = st.columns(3)
+                                _mc1.metric("Total Passes", _n_ph)
+                                _mc2.metric("Completed", _ph_succ)
+                                _mc3.metric("Players", _ph_ply)
+                                fig_ph = _make_plotly_pitch("Pass Origin Density — brighter = more passes")
                                 fig_ph.add_trace(go.Histogram2d(
                                     x=pass_heat['x'], y=pass_heat['y'], nbinsx=20, nbinsy=14,
                                     colorscale='Turbo', reversescale=False, opacity=0.75,
-                                    showscale=True, colorbar=dict(title='Passes')
+                                    showscale=True, colorbar=dict(title='Pass Count')
                                 ))
                                 st.plotly_chart(fig_ph, use_container_width=True)
                                 pass_vol_leaders = pass_heat.groupby('Player').size().reset_index(name='Passes').sort_values('Passes', ascending=False)
@@ -933,11 +971,17 @@ for mgr_idx, manager in enumerate(managers):
                             else:
                                 st.info("No passes in this minute range.")
 
-                        if "Expected Threat (xT) Grid (Legacy)" in modules:
+                        if "Expected Threat (xT) Grid" in modules:
                             st.subheader("🟢 Expected Threat (xT) Grid")
                             xt_acts = viz_df[(viz_df['Type'].isin([1, 3])) & (viz_df['Outcome'] == 'Successful') & (viz_df['xT_Added'] > 0)]
                             if not xt_acts.empty:
-                                fig_l_xt = _make_plotly_pitch("xT Grid")
+                                _xt_total = round(xt_acts['xT_Added'].sum(), 3)
+                                _xt_n = len(xt_acts); _xt_ply = xt_acts['Player'].nunique()
+                                _mc1, _mc2, _mc3 = st.columns(3)
+                                _mc1.metric("Total xT Added", _xt_total)
+                                _mc2.metric("Actions", _xt_n)
+                                _mc3.metric("Players", _xt_ply)
+                                fig_l_xt = _make_plotly_pitch("xT Grid — cell value = xT generated, brighter = higher threat")
                                 xbins = np.linspace(0, 100, 13)
                                 ybins = np.linspace(0, 100, 9)
                                 z, xedges, yedges = np.histogram2d(
@@ -989,11 +1033,16 @@ for mgr_idx, manager in enumerate(managers):
                                     pre_shot_rows.append(w.iloc[-1])
                             pre_shot_df = pd.DataFrame(pre_shot_rows).drop_duplicates(subset=['Index']) if pre_shot_rows else pd.DataFrame()
                             if not high_xt.empty or not pre_shot_df.empty:
-                                fig_hvp = _make_plotly_pitch("High Value Passes")
+                                _n_hxt = len(high_xt); _n_ps = len(pre_shot_df)
+                                _mc1, _mc2, _mc3 = st.columns(3)
+                                _mc1.metric("🟡 High xT Passes", _n_hxt, help="Top 25% by xT value")
+                                _mc2.metric("🟠 Pre-Shot Passes", _n_ps)
+                                _mc3.metric("xT Threshold", f"{round(xT_thresh, 4)}")
+                                fig_hvp = _make_plotly_pitch("High Value Passes — 🟡 High xT · 🟠 Pre-Shot")
                                 if not high_xt.empty:
-                                    _add_plotly_action_lines(fig_hvp, high_xt, "High xT Pass", "#ffd700", width=2)
+                                    _add_plotly_action_lines(fig_hvp, high_xt, "🟡 High xT Pass", "#ffd700", width=2)
                                 if not pre_shot_df.empty:
-                                    _add_plotly_action_lines(fig_hvp, pre_shot_df, "Pre-Shot Pass", "#ff7f50", width=3)
+                                    _add_plotly_action_lines(fig_hvp, pre_shot_df, "🟠 Pre-Shot Pass", "#ff7f50", width=3)
                                 st.plotly_chart(fig_hvp, use_container_width=True)
                                 all_hv = pd.concat([high_xt, pre_shot_df]).drop_duplicates(subset=['Index']) if not pre_shot_df.empty else high_xt
                                 hv_leaders = all_hv.groupby('Player').size().reset_index(name='High Value Passes').sort_values('High Value Passes', ascending=False)
@@ -1009,7 +1058,12 @@ for mgr_idx, manager in enumerate(managers):
                             st.subheader("🟢 Average Attacking & Defending Positions")
                             att_evts = viz_df[viz_df['Type'].isin([1, 3])]
                             def_evts = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
-                            fig_avgpos = _make_plotly_pitch("Average Player Positions — Attack vs Defend")
+                            _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                            _mc1.metric("🟢 Attacking Actions", len(att_evts))
+                            _mc2.metric("🔴 Defensive Actions", len(def_evts))
+                            _mc3.metric("Attacking Players", att_evts['Player'].nunique() if not att_evts.empty else 0)
+                            _mc4.metric("Defending Players", def_evts['Player'].nunique() if not def_evts.empty else 0)
+                            fig_avgpos = _make_plotly_pitch("Average Positions — 🟢 Attack (circle, sized by actions) · 🔴 Defend (diamond)")
                             if not att_evts.empty:
                                 att_avg = att_evts.groupby('Player')[['x', 'y']].mean().reset_index()
                                 att_cnts = att_evts.groupby('Player').size().reset_index(name='Actions')
@@ -1049,6 +1103,16 @@ for mgr_idx, manager in enumerate(managers):
                             all_match_shots = match_df[match_df['Type'].isin([13, 14, 15, 16])].sort_values('Minute')
                             team_shots_mp = all_match_shots[all_match_shots['Team'] == sel_team].copy()
                             opp_shots_mp = all_match_shots[all_match_shots['Team'] != sel_team].copy()
+                            _t_xg = round(team_shots_mp['xG'].sum(), 2); _o_xg = round(opp_shots_mp['xG'].sum(), 2)
+                            _t_goals = len(team_shots_mp[team_shots_mp['Type'] == 16]); _o_goals = len(opp_shots_mp[opp_shots_mp['Type'] == 16])
+                            _t_shots = len(team_shots_mp); _o_shots = len(opp_shots_mp)
+                            _mc1, _mc2, _mc3, _mc4, _mc5, _mc6 = st.columns(6)
+                            _mc1.metric(f"{sel_team} xG", _t_xg)
+                            _mc2.metric(f"{opp_team} xG", _o_xg)
+                            _mc3.metric(f"{sel_team} Goals", _t_goals)
+                            _mc4.metric(f"{opp_team} Goals", _o_goals)
+                            _mc5.metric(f"{sel_team} Shots", _t_shots)
+                            _mc6.metric(f"{opp_team} Shots", _o_shots)
                             mins_mp = list(range(0, max_minute + 2))
                             team_cum, opp_cum = [], []
                             rt, ro = 0.0, 0.0
@@ -1083,7 +1147,16 @@ for mgr_idx, manager in enumerate(managers):
                             def_map = viz_df[viz_df['Type'].isin([4, 7, 8, 12])].copy()
                             if not def_map.empty:
                                 def_map['Action'] = def_map['Type'].map({4: 'Foul', 7: 'Tackle', 8: 'Interception', 12: 'Clearance'})
-                                fig_dm = _make_plotly_pitch("Defensive Action Locations")
+                                _n_tkl = len(def_map[def_map['Action'] == 'Tackle'])
+                                _n_int = len(def_map[def_map['Action'] == 'Interception'])
+                                _n_clr = len(def_map[def_map['Action'] == 'Clearance'])
+                                _n_foul = len(def_map[def_map['Action'] == 'Foul'])
+                                _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                                _mc1.metric("🔵 Tackles", _n_tkl)
+                                _mc2.metric("🟠 Interceptions", _n_int)
+                                _mc3.metric("⬜ Clearances", _n_clr)
+                                _mc4.metric("🔴 Fouls", _n_foul)
+                                fig_dm = _make_plotly_pitch("Defensive Actions — 🔵 Tackle · 🟠 Interception · ⬜ Clearance · 🔴 Foul")
                                 for action, color, symbol in [
                                     ('Tackle', '#00a3ff', 'diamond'),
                                     ('Interception', '#ff9900', 'square'),
@@ -1113,7 +1186,11 @@ for mgr_idx, manager in enumerate(managers):
                             st.subheader("🔴 Defensive Shield")
                             def_heat = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
                             if not def_heat.empty:
-                                fig_ds = _make_plotly_pitch("Defensive Density + Recovery Height")
+                                _mc1, _mc2, _mc3 = st.columns(3)
+                                _mc1.metric("Total Defensive Actions", len(def_heat))
+                                _mc2.metric("Players", def_heat['Player'].nunique())
+                                _mc3.metric("🟡 Avg Recovery Height", f"{avg_rec_height} u", help="Dashed yellow line on the map")
+                                fig_ds = _make_plotly_pitch("Defensive Density — brighter = more actions · 🟡 line = avg recovery height")
                                 fig_ds.add_trace(go.Histogram2d(
                                     x=def_heat['x'], y=def_heat['y'], nbinsx=20, nbinsy=14,
                                     colorscale='Reds', opacity=0.7, showscale=True,
@@ -1130,12 +1207,17 @@ for mgr_idx, manager in enumerate(managers):
                             else:
                                 st.info("No defensive actions to render.")
 
-                        if "Defensive Actions (Legacy)" in modules:
+                        if "Defensive Actions" in modules:
                             st.subheader("🔴 Defensive Actions")
                             def_act = viz_df[viz_df['Type'].isin([4, 7, 8, 12])].copy()
                             if not def_act.empty:
                                 def_act['DefAction'] = def_act['Type'].map({4: 'Foul', 7: 'Tackle', 8: 'Interception', 12: 'Clearance'})
-                                fig_l_def = _make_plotly_pitch("Defensive Actions")
+                                _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                                _mc1.metric("🔵 Tackles", len(def_act[def_act['DefAction'] == 'Tackle']))
+                                _mc2.metric("🟠 Interceptions", len(def_act[def_act['DefAction'] == 'Interception']))
+                                _mc3.metric("⬜ Clearances", len(def_act[def_act['DefAction'] == 'Clearance']))
+                                _mc4.metric("🔴 Fouls", len(def_act[def_act['DefAction'] == 'Foul']))
+                                fig_l_def = _make_plotly_pitch("Defensive Actions — 🔵 Tackle · 🟠 Interception · ⬜ Clearance · 🔴 Foul")
                                 for action, color, symbol in [
                                     ('Tackle', '#3399ff', 'diamond'),
                                     ('Interception', '#ff9900', 'square'),
@@ -1162,10 +1244,21 @@ for mgr_idx, manager in enumerate(managers):
                                 st.info("No defensive actions available for current filters.")
 
                         # --- Attacking Phase ---
-                        if "Actions Leading to Shots (Legacy)" in modules:
+                        if "Actions Leading to Shots" in modules:
                             st.subheader("⚔️ Actions Leading to Shots")
                             shots_df = viz_df[viz_df['Type'].isin([13, 14, 15, 16])].copy()
                             if not shots_df.empty:
+                                _n_goals = len(shots_df[(shots_df['Type'] == 16) & (shots_df['Outcome'] != 'Own Goal')])
+                                _n_saved = len(shots_df[shots_df['Type'] == 15])
+                                _n_blocked = len(shots_df[shots_df['isBlocked']])
+                                _n_missed = len(shots_df) - _n_goals - _n_saved - _n_blocked
+                                _tot_xg = round(shots_df['xG'].sum(), 2)
+                                _mc1, _mc2, _mc3, _mc4, _mc5 = st.columns(5)
+                                _mc1.metric("⭐ Goals", _n_goals)
+                                _mc2.metric("🟡 Saved", _n_saved)
+                                _mc3.metric("⬜ Blocked", _n_blocked)
+                                _mc4.metric("🔴 Missed", _n_missed)
+                                _mc5.metric("Total xG", _tot_xg)
                                 shots_df['ShotResult'] = np.select(
                                     [
                                         (shots_df['Type'] == 16) & (shots_df['Outcome'] != 'Own Goal'),
@@ -1205,7 +1298,7 @@ for mgr_idx, manager in enumerate(managers):
                             else:
                                 st.info("No shot actions available for current filters.")
 
-                        if "Creator Map (Shot Assists) (Legacy)" in modules:
+                        if "Creator Map (Shot Assists)" in modules:
                             st.subheader("⚔️ Creator Map (Shot Assists)")
                             shots_for_assists = viz_df[viz_df['Type'].isin([13, 14, 15, 16])]
                             key_passes = []
@@ -1216,7 +1309,10 @@ for mgr_idx, manager in enumerate(managers):
                                     key_passes.append(prev_pass.iloc[-1])
                             if key_passes:
                                 kp_df = pd.DataFrame(key_passes)
-                                fig_l_creator = _make_plotly_pitch("Creator Map")
+                                _mc1, _mc2 = st.columns(2)
+                                _mc1.metric("Key Passes", len(kp_df))
+                                _mc2.metric("Creators", kp_df['Player'].nunique())
+                                fig_l_creator = _make_plotly_pitch("Creator Map — passes directly preceding a shot")
                                 _add_plotly_action_lines(fig_l_creator, kp_df, "Key Pass", "#00ffff", width=2)
                                 st.plotly_chart(fig_l_creator, use_container_width=True)
                                 creator_leaders = kp_df.groupby('Player').size().reset_index(name='Key Passes').sort_values('Key Passes', ascending=False)
@@ -1228,9 +1324,16 @@ for mgr_idx, manager in enumerate(managers):
                             else:
                                 st.info("No key-pass actions available for current filters.")
 
-                        if "Zone 14 & Half-Spaces (Legacy)" in modules:
+                        if "Zone 14 & Half-Spaces" in modules:
                             st.subheader("⚔️ Zone 14 and Half-Spaces")
-                            fig_l_zones = _make_plotly_pitch("Zone 14 and Half-Spaces")
+                            _z14_c = len(viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful') & viz_df['endX'].between(65,85) & viz_df['endY'].between(37,63)])
+                            _lhs_c = len(viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful') & viz_df['endX'].between(65,85) & viz_df['endY'].between(20,37)])
+                            _rhs_c = len(viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful') & viz_df['endX'].between(65,85) & viz_df['endY'].between(63,80)])
+                            _mc1, _mc2, _mc3 = st.columns(3)
+                            _mc1.metric("🟡 Zone 14 Entries", _z14_c)
+                            _mc2.metric("🔴 Left Half-Space", _lhs_c)
+                            _mc3.metric("🔴 Right Half-Space", _rhs_c)
+                            fig_l_zones = _make_plotly_pitch("Zone 14 🟡 · Left Half-Space 🔴 · Right Half-Space 🔴")
                             zone_defs = [
                                 ('Zone 14', 65, 85, 37, 63, '#ffd700'),
                                 ('LHS', 65, 85, 20, 37, '#ff4b4b'),
@@ -1266,13 +1369,18 @@ for mgr_idx, manager in enumerate(managers):
                                 ~((viz_df['x'] > 83) & (viz_df['y'].between(21, 79)))
                             ].copy()
                             if not final_third_inv.empty or not box_entries_inv.empty:
-                                fig_zi = _make_plotly_pitch("Zone Invasions — Final Third & Box Entries")
+                                _mc1, _mc2, _mc3 = st.columns(3)
+                                _mc1.metric("🟡 Final Third Entries", len(final_third_inv))
+                                _mc2.metric("🔴 Box Entries", len(box_entries_inv))
+                                _inv_all_tmp = pd.concat([final_third_inv, box_entries_inv]).drop_duplicates(subset=['Index'])
+                                _mc3.metric("Players Invading", _inv_all_tmp['Player'].nunique())
+                                fig_zi = _make_plotly_pitch("Zone Invasions — 🟡 Final Third · 🔴 Box Entries")
                                 fig_zi.add_shape(type='rect', x0=66.7, y0=0, x1=100, y1=100, line=dict(color='#ffd700', width=1.5, dash='dot'), fillcolor='rgba(255,215,0,0.05)')
                                 fig_zi.add_shape(type='rect', x0=83, y0=21, x1=100, y1=79, line=dict(color='#ff4b4b', width=2), fillcolor='rgba(255,75,75,0.07)')
                                 if not final_third_inv.empty:
-                                    _add_plotly_action_lines(fig_zi, final_third_inv, "Final Third Entry", "#ffd700", width=2)
+                                    _add_plotly_action_lines(fig_zi, final_third_inv, "🟡 Final Third Entry", "#ffd700", width=2)
                                 if not box_entries_inv.empty:
-                                    _add_plotly_action_lines(fig_zi, box_entries_inv, "Box Entry", "#ff4b4b", width=2)
+                                    _add_plotly_action_lines(fig_zi, box_entries_inv, "🔴 Box Entry", "#ff4b4b", width=2)
                                 st.plotly_chart(fig_zi, use_container_width=True)
                                 inv_all = pd.concat([final_third_inv, box_entries_inv]).drop_duplicates(subset=['Index'])
                                 inv_leaders = inv_all.groupby('Player').size().reset_index(name='Zone Invasions').sort_values('Zone Invasions', ascending=False)
@@ -1291,8 +1399,10 @@ for mgr_idx, manager in enumerate(managers):
                                 (plot_df['Type'].isin([7, 8, 12])) &
                                 ((plot_df['Outcome'] == 'Successful') | (plot_df['Type'].isin([8, 12])))
                             ].sort_values('Index')
-
-                            fig_ptl = _make_plotly_pitch("First 3-4 Actions After Ball Wins")
+                            _mc1, _mc2 = st.columns(2)
+                            _mc1.metric("Ball Wins", len(ball_wins))
+                            _mc2.metric("Players", ball_wins['Player'].nunique() if not ball_wins.empty else 0)
+                            fig_ptl = _make_plotly_pitch("First 3–4 Actions After Ball Wins — each colour = one sequence")
                             palette = ['#00ff85', '#36d6e7', '#ffd700', '#ff7f50']
                             seq_count = 0
                             for _, win in ball_wins.head(24).iterrows():
@@ -1339,6 +1449,9 @@ for mgr_idx, manager in enumerate(managers):
                         if "Time-to-Shot Scatter Plot" in modules:
                             st.subheader("⚡ Time-to-Shot Scatter Plot")
                             shots = plot_df[(plot_df['Type'].isin([13, 14, 15, 16])) & (plot_df['Outcome'] != 'Own Goal')].sort_values('Index')
+                            _mc1, _mc2 = st.columns(2)
+                            _mc1.metric("Shots Analysed", len(shots))
+                            _mc2.metric("Goals", len(shots[shots['Type'] == 16]))
                             rows = []
                             for _, shot in shots.iterrows():
                                 prior_opp = match_df[(match_df['Index'] < shot['Index']) & (match_df['Team'] != sel_team)].sort_values('Index').tail(1)
@@ -1390,7 +1503,11 @@ for mgr_idx, manager in enumerate(managers):
                                 (plot_df['Type'].isin([7, 8, 12])) &
                                 ((plot_df['Outcome'] == 'Successful') | (plot_df['Type'].isin([8, 12])))
                             ].sort_values('Index')
-                            fig_tm = _make_plotly_pitch("Transition Map — Passes, Shots & Goals from Ball Wins")
+                            _mc1, _mc2 = st.columns(2)
+                            _mc1.metric("Ball Wins (transitions)", len(ball_wins_tm))
+                            _mc2.metric("Players", ball_wins_tm['Player'].nunique() if not ball_wins_tm.empty else 0)
+                            st.caption("🔵 Transition passes · 🟡 Shots · ⭐ Goals — hover for player, minute & xG")
+                            fig_tm = _make_plotly_pitch("Transition Map — 🔵 Passes · 🟡 Shots · ⭐ Goals")
                             t_pass_xs, t_pass_ys = [], []
                             t_shot_rows, t_goal_rows, trans_event_frames = [], [], []
                             for _, win in ball_wins_tm.iterrows():
@@ -1451,7 +1568,12 @@ for mgr_idx, manager in enumerate(managers):
                         if "Recovery vs. Loss Maps" in modules:
                             st.subheader("🧯 Recovery vs. Loss Maps")
                             if not transitions_df.empty:
-                                fig_rl = _make_plotly_pitch("Ball Losses and Subsequent Recoveries")
+                                _mc1, _mc2, _mc3 = st.columns(3)
+                                _mc1.metric("🔴 Ball Losses", len(transitions_df))
+                                _mc2.metric("🟢 Recoveries", len(transitions_df))
+                                _avg_react = round((transitions_df['rec_idx'] - transitions_df['loss_idx']).mean(), 1) if not transitions_df.empty else 0
+                                _mc3.metric("Avg Events to Recovery", _avg_react)
+                                fig_rl = _make_plotly_pitch("Recovery vs Loss — 🔴 Loss location · 🟢 Recovery location")
                                 xs, ys = [], []
                                 for _, r in transitions_df.iterrows():
                                     xs.extend([r['loss_x'], r['rec_x'], None])
@@ -1482,6 +1604,7 @@ for mgr_idx, manager in enumerate(managers):
                         if "Defensive Reaction Time/Distance Curves" in modules:
                             st.subheader("🧯 Defensive Reaction Time/Distance Curves")
                             if not transitions_df.empty:
+                                st.caption("🔵 dots = individual transitions · 🟡 line = average curve — X axis: event count between loss and recovery")
                                 transitions_df['Reaction Events'] = transitions_df['rec_idx'] - transitions_df['loss_idx']
                                 transitions_df['Recovery Distance'] = np.sqrt(
                                     (transitions_df['rec_x'] - transitions_df['loss_x']) ** 2 +
@@ -1517,9 +1640,13 @@ for mgr_idx, manager in enumerate(managers):
                             st.subheader("🎯 Set Piece Targeting (Corners)")
                             corners = viz_df[(viz_df['Type'] == 1) & (viz_df['isCorner'])]
                             if not corners.empty:
-                                fig_corners = _make_plotly_pitch("Corner Delivery Map")
-                                _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Successful'], "Successful Corner", "#00ffff", width=2)
-                                _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Unsuccessful'], "Unsuccessful Corner", "#ff4b4b", width=2, dash='dot')
+                                _mc1, _mc2, _mc3 = st.columns(3)
+                                _mc1.metric("Total Corners", len(corners))
+                                _mc2.metric("✅ Completed", len(corners[corners['Outcome'] == 'Successful']))
+                                _mc3.metric("❌ Incomplete", len(corners[corners['Outcome'] == 'Unsuccessful']))
+                                fig_corners = _make_plotly_pitch("Corner Delivery — ✅ Completed · ❌ Incomplete")
+                                _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Successful'], "✅ Completed Corner", "#00ffff", width=2)
+                                _add_plotly_action_lines(fig_corners, corners[corners['Outcome'] == 'Unsuccessful'], "❌ Incomplete Corner", "#ff4b4b", width=2, dash='dot')
                                 st.plotly_chart(fig_corners, use_container_width=True)
                                 corner_leaders = corners.groupby('Player').size().reset_index(name='Corners').sort_values('Corners', ascending=False)
                                 if not corner_leaders.empty:
@@ -1534,9 +1661,13 @@ for mgr_idx, manager in enumerate(managers):
                             st.subheader("🎯 Free Kick Targeting")
                             free_kicks = viz_df[(viz_df['Type'] == 1) & (viz_df['isFreeKick'])]
                             if not free_kicks.empty:
-                                fig_fk = _make_plotly_pitch("Free-Kick Delivery Map")
-                                _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Successful'], "Successful FK", "#00ffff", width=2)
-                                _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Unsuccessful'], "Unsuccessful FK", "#ff4b4b", width=2, dash='dot')
+                                _mc1, _mc2, _mc3 = st.columns(3)
+                                _mc1.metric("Total Free Kicks", len(free_kicks))
+                                _mc2.metric("✅ Completed", len(free_kicks[free_kicks['Outcome'] == 'Successful']))
+                                _mc3.metric("Takers", free_kicks['Player'].nunique())
+                                fig_fk = _make_plotly_pitch("Free-Kick Delivery — ✅ Completed · ❌ Incomplete")
+                                _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Successful'], "✅ Completed FK", "#00ffff", width=2)
+                                _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Unsuccessful'], "❌ Incomplete FK", "#ff4b4b", width=2, dash='dot')
                                 st.plotly_chart(fig_fk, use_container_width=True)
                                 fk_leaders = free_kicks.groupby('Player').size().reset_index(name='Free Kicks').sort_values('Free Kicks', ascending=False)
                                 if not fk_leaders.empty:
@@ -1552,6 +1683,12 @@ for mgr_idx, manager in enumerate(managers):
                             st.subheader("🧤 Shot Trajectory Map (GK View)")
                             faced = opp_stats[(opp_stats['Type'].isin([13, 14, 15, 16])) & (opp_stats['Outcome'] != 'Own Goal')].copy()
                             if not faced.empty:
+                                _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                                _mc1.metric("Shots Faced", len(faced))
+                                _mc2.metric("🔴 Goals Conceded", len(faced[faced['Type'] == 16]))
+                                _mc3.metric("🔵 Saved/Missed", len(faced[faced['Type'] != 16]))
+                                _mc4.metric("Opp xG vs", round(faced['xG'].sum(), 2))
+                                st.caption("X axis: lateral offset from goal centre (left ← 0 → right) · Y axis: distance from goal line")
                                 faced['DepthToGoal'] = 100 - faced['x']
                                 faced['LateralFromCenter'] = faced['y'] - 50
                                 faced['Result'] = np.where(faced['Type'] == 16, 'Goal Conceded', 'Saved/Missed')
@@ -1580,6 +1717,9 @@ for mgr_idx, manager in enumerate(managers):
                             st.subheader("🧤 Goal Kick Direction Map")
                             gkicks = viz_df[viz_df['Type'] == 52]
                             if not gkicks.empty:
+                                _mc1, _mc2 = st.columns(2)
+                                _mc1.metric("Goal Kicks", len(gkicks))
+                                _mc2.metric("Takers", gkicks['Player'].nunique())
                                 fig_gkd = _make_plotly_pitch("Goal Kick Direction and Target Zones")
                                 _add_plotly_action_lines(fig_gkd, gkicks, "Goal Kick", "#3b82f6", width=3)
                                 st.plotly_chart(fig_gkd, use_container_width=True)
@@ -1588,16 +1728,19 @@ for mgr_idx, manager in enumerate(managers):
 
                         st.divider()
 
-                        # --- Legacy telemetry maps (classic system) ---
+                        # --- Classic telemetry maps ---
                         legacy_pitch_mods = legacy_mods.copy()
                         if legacy_pitch_mods:
-                            st.markdown("#### 🧭 Legacy Telemetry Maps")
+                            st.markdown("#### 🧭 Classic Telemetry Maps")
 
-                            if "The Architect (Build-Up Phase) (Legacy)" in legacy_pitch_mods:
-                                st.subheader("🧭 Legacy: The Architect (Build-Up Phase)")
+                            if "The Architect (Build-Up Phase)" in legacy_pitch_mods:
+                                st.subheader("🧭 The Architect (Build-Up Phase)")
                                 build_up = viz_df[(viz_df['Type'] == 1) & (viz_df['x'] < 33)]
                                 if not build_up.empty:
-                                    fig_l_build = _make_plotly_pitch("Legacy Build-Up Phase")
+                                    _mc1, _mc2 = st.columns(2)
+                                    _mc1.metric("Build-Up Passes", len(build_up))
+                                    _mc2.metric("Players", build_up['Player'].nunique())
+                                    fig_l_build = _make_plotly_pitch("Build-Up Phase — passes originating in own third (x < 33)")
                                     _add_plotly_action_lines(fig_l_build, build_up, "Build-Up Pass", "#00ffff", width=2)
                                     st.plotly_chart(fig_l_build, use_container_width=True)
                                     build_leaders = build_up.groupby('Player').size().reset_index(name='Build-Up Passes').sort_values('Build-Up Passes', ascending=False)
@@ -1607,10 +1750,11 @@ for mgr_idx, manager in enumerate(managers):
                                             fig_bul.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
                                             st.plotly_chart(fig_bul, use_container_width=True)
                                 else:
-                                    st.info("No legacy build-up actions available for current filters.")
+                                    st.info("No build-up actions available for current filters.")
 
-                            if "Passing Network (Structure) (Legacy)" in legacy_pitch_mods:
-                                st.subheader("🧭 Legacy: Passing Network (Structure)")
+                            if "Passing Network (Structure)" in legacy_pitch_mods:
+                                st.subheader("🧭 Passing Network (Structure)")
+                                st.caption("Node size = event involvement · Edge thickness = pass frequency between two players (min 3 passes)")
                                 net_df = viz_df.copy()
                                 avg_pos = net_df.groupby('Player')[['x', 'y']].mean()
                                 pass_counts = net_df.groupby('Player').size()
@@ -1620,7 +1764,7 @@ for mgr_idx, manager in enumerate(managers):
                                 if not edges.empty:
                                     links = edges.groupby(['Player', 'NextPlayer']).size().reset_index(name='count')
                                     links = links[links['count'] > 2]
-                                    fig_l_net = _make_plotly_pitch("Legacy Passing Network")
+                                    fig_l_net = _make_plotly_pitch("Passing Network (Structure)")
                                     max_edge = max(links['count'].max(), 1)
                                     for _, row in links.iterrows():
                                         p1, p2, c = row['Player'], row['NextPlayer'], row['count']
@@ -1648,7 +1792,7 @@ for mgr_idx, manager in enumerate(managers):
                                     ))
                                     st.plotly_chart(fig_l_net, use_container_width=True)
                                 else:
-                                    st.info("No legacy passing-network values available for current filters.")
+                                    st.info("No passing-network values available for current filters.")
 
                     else:
                         st.error(f"Error: {err}")
