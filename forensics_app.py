@@ -1415,6 +1415,73 @@ for mgr_idx, manager in enumerate(managers):
                                         hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
                                     ))
                                 st.plotly_chart(fig_l_shots, use_container_width=True)
+
+                                # --- Pre-shot action chain ---
+                                _action_type_map = {1: 'Pass', 3: 'Dribble / Carry', 7: 'Tackle Won', 8: 'Interception'}
+                                _pre_shot_rows = []
+                                for _, _shot in shots_df.iterrows():
+                                    _prev = viz_df[
+                                        (viz_df['Index'] < _shot['Index']) &
+                                        (viz_df['Index'] >= _shot['Index'] - 8) &
+                                        (viz_df['Type'].isin([1, 3, 7, 8]))
+                                    ].sort_values('Index')
+                                    if not _prev.empty:
+                                        _act = _prev.iloc[-1].copy()
+                                        _act['ActionLabel'] = _action_type_map.get(_act['Type'], 'Other')
+                                        _act['ShotResult'] = _shot['ShotResult']
+                                        _act['ShotMinute'] = _shot['Minute']
+                                        _pre_shot_rows.append(_act)
+
+                                if _pre_shot_rows:
+                                    _pre_df = pd.DataFrame(_pre_shot_rows)
+                                    _n_pass_led = len(_pre_df[_pre_df['ActionLabel'] == 'Pass'])
+                                    _n_drb_led = len(_pre_df[_pre_df['ActionLabel'] == 'Dribble / Carry'])
+                                    _n_int_led = len(_pre_df[_pre_df['ActionLabel'] == 'Interception'])
+                                    _n_tkl_led = len(_pre_df[_pre_df['ActionLabel'] == 'Tackle Won'])
+                                    _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                                    _mc1.metric("🔵 Pass-Led", _n_pass_led)
+                                    _mc2.metric("🟣 Dribble-Led", _n_drb_led)
+                                    _mc3.metric("🟠 Interception-Led", _n_int_led)
+                                    _mc4.metric("🔵 Tackle-Led", _n_tkl_led)
+
+                                    _action_styles = {
+                                        'Pass':             ('#00ffff', 'solid',  2),
+                                        'Dribble / Carry':  ('#a855f7', 'solid',  2),
+                                        'Interception':     ('#ff9900', 'dot',    2),
+                                        'Tackle Won':       ('#00a3ff', 'dot',    2),
+                                    }
+                                    fig_pre = _make_plotly_pitch("Actions That Led to Shots — 🔵 Pass · 🟣 Dribble · 🟠 Interception · 🔷 Tackle")
+                                    for _lbl, (_col, _dash, _w) in _action_styles.items():
+                                        _sub = _pre_df[_pre_df['ActionLabel'] == _lbl]
+                                        if not _sub.empty:
+                                            _add_plotly_action_lines(fig_pre, _sub, _lbl, _col, dash=_dash, width=_w)
+                                    st.plotly_chart(fig_pre, use_container_width=True)
+
+                                    with st.expander("📊 Pre-Shot Action Breakdown"):
+                                        _bc1, _bc2 = st.columns(2)
+                                        with _bc1:
+                                            st.markdown("**Actions by Type**")
+                                            _type_counts = _pre_df['ActionLabel'].value_counts().reset_index()
+                                            _type_counts.columns = ['Action Type', 'Count']
+                                            _color_map = {'Pass': '#00ffff', 'Dribble / Carry': '#a855f7', 'Interception': '#ff9900', 'Tackle Won': '#00a3ff'}
+                                            fig_tc = px.bar(_type_counts.sort_values('Count'), x='Count', y='Action Type',
+                                                            orientation='h', template='plotly_dark',
+                                                            color='Action Type', color_discrete_map=_color_map)
+                                            fig_tc.update_layout(height=220, margin=dict(l=0, r=0, t=10, b=0), showlegend=False)
+                                            st.plotly_chart(fig_tc, use_container_width=True)
+                                        with _bc2:
+                                            st.markdown("**Players — Pre-Shot Actions**")
+                                            _player_counts = _pre_df.groupby(['Player', 'ActionLabel']).size().reset_index(name='Count')
+                                            _player_total = _player_counts.groupby('Player')['Count'].sum().reset_index().sort_values('Count', ascending=False).head(8)
+                                            _player_counts_top = _player_counts[_player_counts['Player'].isin(_player_total['Player'])]
+                                            fig_pp = px.bar(_player_counts_top, x='Count', y='Player', color='ActionLabel',
+                                                            orientation='h', template='plotly_dark',
+                                                            color_discrete_map=_color_map, barmode='stack')
+                                            fig_pp.update_layout(height=max(220, len(_player_total) * 30),
+                                                                 margin=dict(l=0, r=0, t=10, b=0),
+                                                                 legend=dict(orientation='h', yanchor='bottom', y=1.01, xanchor='center', x=0.5))
+                                            st.plotly_chart(fig_pp, use_container_width=True)
+
                                 xg_leaders = shots_df.groupby('Player')['xG'].sum().reset_index(name='Total xG').sort_values('Total xG', ascending=False)
                                 shot_counts = shots_df.groupby('Player').size().reset_index(name='Shots')
                                 xg_leaders = xg_leaders.merge(shot_counts, on='Player')
