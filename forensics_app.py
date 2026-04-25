@@ -2319,31 +2319,167 @@ for mgr_idx, manager in enumerate(managers):
                             st.subheader("🧤 Shot Trajectory Map (GK View)")
                             faced = opp_stats[(opp_stats['Type'].isin([13, 14, 15, 16])) & (opp_stats['Outcome'] != 'Own Goal')].copy()
                             if not faced.empty:
+                                faced['Result'] = np.select(
+                                    [faced['Type'] == 16, faced['isBlocked'], faced['Type'] == 15],
+                                    ['Goal', 'Blocked', 'Saved'],
+                                    default='Missed/Wide'
+                                )
+                                # Goal mouth Opta coords: x=100, y≈44.2–55.8 (7.32m / 68m * 100 centred at 50)
+                                _GL, _GR = 44.2, 55.8   # left/right post y-coords
+                                _CL, _CR = 47.8, 52.2   # inner zone dividers
+                                def _shot_zone(row):
+                                    if row['isBlocked']:
+                                        return 'Blocked'
+                                    ey = row['endY']
+                                    if ey < _GL or ey > _GR:
+                                        return 'Missed/Wide'
+                                    if ey < _CL:
+                                        return "GK's Left"
+                                    if ey > _CR:
+                                        return "GK's Right"
+                                    return 'Centre'
+                                faced['ShotZone'] = faced.apply(_shot_zone, axis=1)
+
+                                # --- Metrics ---
                                 _mc1, _mc2, _mc3, _mc4 = st.columns(4)
                                 _mc1.metric("Shots Faced", len(faced))
-                                _mc2.metric("🔴 Goals Conceded", len(faced[faced['Type'] == 16]))
-                                _mc3.metric("🔵 Saved/Missed", len(faced[faced['Type'] != 16]))
+                                _mc2.metric("🔴 Goals Conceded", len(faced[faced['Result'] == 'Goal']))
+                                _mc3.metric("🔵 Saves", len(faced[faced['Result'] == 'Saved']))
                                 _mc4.metric("Opp xG vs", round(faced['xG'].sum(), 2))
-                                st.caption("X axis: lateral offset from goal centre (left ← 0 → right) · Y axis: distance from goal line")
-                                faced['DepthToGoal'] = 100 - faced['x']
-                                faced['LateralFromCenter'] = faced['y'] - 50
-                                faced['Result'] = np.where(faced['Type'] == 16, 'Goal Conceded', 'Saved/Missed')
-                                fig_gk = px.scatter(
-                                    faced,
-                                    x='LateralFromCenter', y='DepthToGoal',
-                                    color='Result',
-                                    color_discrete_map={'Goal Conceded': '#ff4b4b', 'Saved/Missed': '#00a3ff'},
-                                    hover_data=['Player', 'Minute', 'xG'],
-                                    template='plotly_dark',
-                                    title='Opponent Shot Origins from Goalkeeper Perspective'
+                                _zc = faced['ShotZone'].value_counts()
+                                _mc5, _mc6, _mc7, _mc8 = st.columns(4)
+                                _mc5.metric("↙ GK's Left", _zc.get("GK's Left", 0))
+                                _mc6.metric("↕ Centre", _zc.get("Centre", 0))
+                                _mc7.metric("↘ GK's Right", _zc.get("GK's Right", 0))
+                                _mc8.metric("🚫 Blocked/Wide", int(_zc.get("Blocked", 0)) + int(_zc.get("Missed/Wide", 0)))
+
+                                _color_r = {'Goal': '#00ff85', 'Saved': '#00a3ff', 'Missed/Wide': '#ffd700', 'Blocked': '#888888'}
+
+                                # --- Pitch trajectory map ---
+                                st.caption("Shot trajectories on pitch · arrows show direction of travel · size of goal-face dot = xG")
+                                fig_st = _make_plotly_pitch("Shot Trajectories — 🟢 Goal · 🔵 Saved · 🟡 Missed · ⬜ Blocked")
+                                fig_st.update_layout(
+                                    legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5,
+                                                bgcolor='rgba(14,17,23,0.7)', bordercolor='#444', borderwidth=1),
+                                    margin=dict(l=10, r=10, t=45, b=60),
                                 )
-                                fig_gk.update_xaxes(title='Lateral Offset from Goal Center (Left <-> Right)')
-                                fig_gk.update_yaxes(title='Distance from Goal Line')
-                                st.plotly_chart(fig_gk, use_container_width=True)
-                                threat_leaders = faced.groupby('Player')['xG'].sum().reset_index(name='Total xG').sort_values('Total xG', ascending=False)
-                                if not threat_leaders.empty:
+                                for _res, _col in _color_r.items():
+                                    _rdf = faced[faced['Result'] == _res]
+                                    if _rdf.empty:
+                                        continue
+                                    # Trajectory lines
+                                    _xs, _ys = [], []
+                                    for _, _r in _rdf.iterrows():
+                                        _xs.extend([_r['x'], _r['endX'], None])
+                                        _ys.extend([_r['y'], _r['endY'], None])
+                                    fig_st.add_trace(go.Scatter(
+                                        x=_xs, y=_ys, mode='lines',
+                                        line=dict(color=_col, width=1.5), opacity=0.55,
+                                        name=_res, showlegend=True, hoverinfo='skip'
+                                    ))
+                                    # Arrow heads at endpoint
+                                    _sym = 'star' if _res == 'Goal' else 'circle'
+                                    fig_st.add_trace(go.Scatter(
+                                        x=_rdf['endX'], y=_rdf['endY'], mode='markers',
+                                        name=_res, showlegend=False,
+                                        marker=dict(color=_col, size=10, symbol=_sym,
+                                                    line=dict(color='white', width=1)),
+                                        customdata=np.column_stack([_rdf['Player'], _rdf['Minute'],
+                                                                     _rdf['xG'].round(3), _rdf['ShotZone']]),
+                                        hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>xG: %{customdata[2]}<br>Zone: %{customdata[3]}<extra></extra>"
+                                    ))
+                                st.plotly_chart(fig_st, use_container_width=True)
+
+                                # --- Goal face view ---
+                                st.caption("Goal frame view — GK faces outfield · left/right from GK's perspective · dot size = xG")
+                                fig_gf = go.Figure()
+                                fig_gf.update_layout(
+                                    template='plotly_dark',
+                                    title='Shot Placement — Goal Face (GK Perspective)',
+                                    xaxis=dict(
+                                        range=[40, 60], showgrid=False, zeroline=False,
+                                        title="← GK's Left  |  Lateral Position  |  GK's Right →",
+                                        tickvals=[_GL, 50, _GR],
+                                        ticktext=['Left Post', 'Centre', 'Right Post'],
+                                    ),
+                                    yaxis=dict(range=[-0.3, 3.1], showgrid=False, zeroline=False, showticklabels=False),
+                                    height=340, margin=dict(l=10, r=10, t=50, b=80),
+                                    legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='center', x=0.5),
+                                    shapes=[
+                                        # Left post, right post, crossbar
+                                        dict(type='line', x0=_GL, y0=0, x1=_GL, y1=2.44, line=dict(color='white', width=3)),
+                                        dict(type='line', x0=_GR, y0=0, x1=_GR, y1=2.44, line=dict(color='white', width=3)),
+                                        dict(type='line', x0=_GL, y0=2.44, x1=_GR, y1=2.44, line=dict(color='white', width=3)),
+                                        dict(type='line', x0=_GL, y0=0, x1=_GR, y1=0, line=dict(color='rgba(255,255,255,0.25)', width=1)),
+                                        # Zone fills
+                                        dict(type='rect', x0=_GL, y0=0, x1=_CL, y1=2.44, fillcolor='rgba(0,163,255,0.12)', line=dict(width=0)),
+                                        dict(type='rect', x0=_CL, y0=0, x1=_CR, y1=2.44, fillcolor='rgba(255,255,255,0.04)', line=dict(width=0)),
+                                        dict(type='rect', x0=_CR, y0=0, x1=_GR, y1=2.44, fillcolor='rgba(255,75,75,0.12)', line=dict(width=0)),
+                                        # Zone dividers
+                                        dict(type='line', x0=_CL, y0=0, x1=_CL, y1=2.44, line=dict(color='rgba(255,255,255,0.2)', width=1, dash='dot')),
+                                        dict(type='line', x0=_CR, y0=0, x1=_CR, y1=2.44, line=dict(color='rgba(255,255,255,0.2)', width=1, dash='dot')),
+                                    ]
+                                )
+                                # Zone labels above crossbar
+                                for _lbl, _xc in [("GK's Left", (_GL + _CL) / 2), ("Centre", 50), ("GK's Right", (_CR + _GR) / 2)]:
+                                    fig_gf.add_annotation(x=_xc, y=2.58, text=_lbl, showarrow=False,
+                                                           font=dict(color='rgba(255,255,255,0.6)', size=11), yanchor='bottom')
+                                # Shot dots — jitter vertically for readability
+                                for _res, _col in _color_r.items():
+                                    _rdf = faced[faced['Result'] == _res].copy()
+                                    if _rdf.empty:
+                                        continue
+                                    np.random.seed(42)
+                                    _jy = np.random.uniform(0.15, 2.25, len(_rdf))
+                                    fig_gf.add_trace(go.Scatter(
+                                        x=_rdf['endY'], y=_jy, mode='markers',
+                                        name=_res,
+                                        marker=dict(
+                                            color=_col,
+                                            size=np.clip(_rdf['xG'].values * 100, 9, 26),
+                                            opacity=0.88,
+                                            line=dict(color='white', width=1),
+                                            symbol='star' if _res == 'Goal' else 'circle'
+                                        ),
+                                        customdata=np.column_stack([_rdf['Player'], _rdf['Minute'],
+                                                                     _rdf['xG'].round(3), _rdf['ShotZone']]),
+                                        hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>xG: %{customdata[2]}<br>Zone: %{customdata[3]}<extra></extra>"
+                                    ))
+                                st.plotly_chart(fig_gf, use_container_width=True)
+
+                                # --- Expanders ---
+                                _e1, _e2 = st.columns(2)
+                                _zone_order = ["GK's Left", "Centre", "GK's Right", "Missed/Wide", "Blocked"]
+                                _zone_df = faced.groupby(['ShotZone', 'Result']).size().reset_index(name='Count')
+                                _zone_totals = faced.groupby('ShotZone').agg(
+                                    Shots=('Result', 'count'),
+                                    Goals=('Result', lambda x: (x == 'Goal').sum()),
+                                    xG=('xG', 'sum')
+                                ).reset_index()
+                                _zone_totals['xG'] = _zone_totals['xG'].round(3)
+                                with _e1:
+                                    with st.expander("📊 Shot Zone Breakdown"):
+                                        fig_zone = px.bar(
+                                            _zone_df, x='ShotZone', y='Count', color='Result',
+                                            color_discrete_map=_color_r, template='plotly_dark', barmode='stack',
+                                            category_orders={'ShotZone': _zone_order}
+                                        )
+                                        fig_zone.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0),
+                                                               legend=dict(orientation='h', yanchor='bottom', y=1.01, xanchor='center', x=0.5))
+                                        st.plotly_chart(fig_zone, use_container_width=True)
+                                        st.dataframe(_zone_totals[['ShotZone', 'Shots', 'Goals', 'xG']].reset_index(drop=True),
+                                                     use_container_width=True, hide_index=True)
+                                with _e2:
+                                    threat_leaders = faced.groupby('Player').agg(
+                                        xG=('xG', 'sum'),
+                                        Shots=('Result', 'count'),
+                                        Goals=('Result', lambda x: (x == 'Goal').sum())
+                                    ).reset_index().sort_values('xG', ascending=False)
+                                    threat_leaders['xG'] = threat_leaders['xG'].round(3)
                                     with st.expander("👥 Most Threatening Players (Opp.)"):
-                                        fig_thl = px.bar(threat_leaders.head(8).sort_values('Total xG'), x='Total xG', y='Player', orientation='h', template='plotly_dark')
+                                        fig_thl = px.bar(threat_leaders.head(8).sort_values('xG'), x='xG', y='Player',
+                                                          orientation='h', template='plotly_dark',
+                                                          color_discrete_sequence=['#ff4b4b'])
                                         fig_thl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
                                         st.plotly_chart(fig_thl, use_container_width=True)
                             else:
