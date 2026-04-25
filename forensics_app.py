@@ -811,7 +811,7 @@ for mgr_idx, manager in enumerate(managers):
                         st.markdown("#### 🗂️ Select Evidence Layers")
 
                         in_pos_options = [
-                            "Progressive Passes Map", "Passes into Zone 14", "Pass Map", "Passing Heatmap",
+                            "Progressive Passes Map", "Pass Map", "Passing Heatmap",
                             "Expected Threat (xT) Grid", "High Value Pass Map",
                             "Average Attacking & Defending Positions", "Match Progression",
                             "The Architect (Build-Up Phase)", "Passing Network (Structure)"
@@ -895,25 +895,6 @@ for mgr_idx, manager in enumerate(managers):
                                     fig_prog_lead.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
                                     st.plotly_chart(fig_prog_lead, use_container_width=True)
 
-                        if "Passes into Zone 14" in modules:
-                            st.subheader("🟢 Passes into Zone 14")
-                            _n_z14 = len(zone14_passes)
-                            _z14_ply = zone14_passes['Player'].nunique() if not zone14_passes.empty else 0
-                            _z14_succ = len(zone14_passes[zone14_passes['Outcome'] == 'Successful']) if not zone14_passes.empty else 0
-                            _mc1, _mc2, _mc3 = st.columns(3)
-                            _mc1.metric("Zone 14 Passes", _n_z14)
-                            _mc2.metric("Players Involved", _z14_ply)
-                            _mc3.metric("Completed", _z14_succ)
-                            fig_z14 = _make_plotly_pitch("Entries Into Zone 14")
-                            fig_z14.add_shape(type='rect', x0=65, y0=37, x1=85, y1=63, line=dict(color='#ffd700', width=2), fillcolor='rgba(255,215,0,0.15)')
-                            _add_plotly_action_lines(fig_z14, zone14_passes, "Zone 14 Entry", "#ffd700", width=3)
-                            st.plotly_chart(fig_z14, use_container_width=True)
-                            if not z14_leaders.empty:
-                                with st.expander("👥 Zone 14 Pass Leaders"):
-                                    fig_z14_lead = px.bar(z14_leaders.head(8).sort_values('Zone 14 Passes'), x='Zone 14 Passes', y='Player', orientation='h', template='plotly_dark')
-                                    fig_z14_lead.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
-                                    st.plotly_chart(fig_z14_lead, use_container_width=True)
-
                         if "Pass Map" in modules:
                             st.subheader("🟢 Pass Map")
                             succ_passes_df = viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful')]
@@ -930,11 +911,20 @@ for mgr_idx, manager in enumerate(managers):
                             _add_plotly_action_lines(fig_pm, fail_passes_df, "❌ Unsuccessful", "#ff4b4b", width=2, dash='dot')
                             st.plotly_chart(fig_pm, use_container_width=True)
                             pass_leaders = succ_passes_df.groupby('Player').size().reset_index(name='Completed Passes').sort_values('Completed Passes', ascending=False)
-                            if not pass_leaders.empty:
-                                with st.expander("👥 Pass Completion Leaders"):
-                                    fig_pl = px.bar(pass_leaders.head(8).sort_values('Completed Passes'), x='Completed Passes', y='Player', orientation='h', template='plotly_dark')
-                                    fig_pl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
-                                    st.plotly_chart(fig_pl, use_container_width=True)
+                            fail_leaders = fail_passes_df.groupby('Player').size().reset_index(name='Unsuccessful Passes').sort_values('Unsuccessful Passes', ascending=False)
+                            _exp_c1, _exp_c2 = st.columns(2)
+                            with _exp_c1:
+                                if not pass_leaders.empty:
+                                    with st.expander("👥 Pass Completion Leaders"):
+                                        fig_pl = px.bar(pass_leaders.head(8).sort_values('Completed Passes'), x='Completed Passes', y='Player', orientation='h', template='plotly_dark')
+                                        fig_pl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_pl, use_container_width=True)
+                            with _exp_c2:
+                                if not fail_leaders.empty:
+                                    with st.expander("❌ Unsuccessful Pass Leaders"):
+                                        fig_fl = px.bar(fail_leaders.head(8).sort_values('Unsuccessful Passes'), x='Unsuccessful Passes', y='Player', orientation='h', template='plotly_dark', color_discrete_sequence=['#ff4b4b'])
+                                        fig_fl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_fl, use_container_width=True)
 
                         if "Passing Heatmap" in modules:
                             st.subheader("🟢 Passing Heatmap")
