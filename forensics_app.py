@@ -1049,7 +1049,7 @@ for mgr_idx, manager in enumerate(managers):
                             _mc2.metric(f"🔴 {opp_team} Def. Actions", len(opp_def_evts))
                             _mc3.metric(f"{sel_team} Players", att_evts['Player'].nunique() if not att_evts.empty else 0)
                             _mc4.metric(f"{opp_team} Players", opp_def_evts['Player'].nunique() if not opp_def_evts.empty else 0)
-                            fig_avgpos = _make_plotly_pitch(f"{sel_team} Average Attacking Positions vs. {opp_team}'s Average Defensive Positions")
+                            fig_avgpos = _make_plotly_pitch(f"{sel_team} ⚔ Attack  vs.  {opp_team} 🛡 Defence")
                             if not att_evts.empty:
                                 att_avg = att_evts.groupby('Player')[['x', 'y']].mean().reset_index()
                                 att_cnts = att_evts.groupby('Player').size().reset_index(name='Actions')
