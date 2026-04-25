@@ -2299,6 +2299,13 @@ for mgr_idx, manager in enumerate(managers):
                                 if not _corn_shots_df.empty:
                                     _ck_shot_only = _corn_shots_df[_corn_shots_df['Type'].isin([13, 14, 15])]
                                     _ck_goal_only = _corn_shots_df[_corn_shots_df['Type'] == 16]
+                                    # Find which corner deliveries directly preceded a goal
+                                    _ck_goal_delivery_rows = []
+                                    for _, _goal_row in _ck_goal_only.iterrows():
+                                        _prec_ck = corners[(corners['Index'] < _goal_row['Index']) & (corners['Index'] >= _goal_row['Index'] - 8)]
+                                        for _, _cr in _prec_ck.iterrows():
+                                            _ck_goal_delivery_rows.append(_cr)
+                                    _ck_goal_deliveries_df = pd.DataFrame(_ck_goal_delivery_rows).drop_duplicates(subset=['Index']) if _ck_goal_delivery_rows else pd.DataFrame()
                                     if "🟡 Shot" in _corn_filter and not _ck_shot_only.empty:
                                         fig_corners.add_trace(go.Scatter(
                                             x=_ck_shot_only['x'], y=_ck_shot_only['y'], mode='markers',
@@ -2309,6 +2316,8 @@ for mgr_idx, manager in enumerate(managers):
                                                                          _ck_shot_only['xG'].round(3)]),
                                             hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
                                         ))
+                                    if "⭐ Goal" in _corn_filter and not _ck_goal_deliveries_df.empty:
+                                        _add_plotly_action_lines(fig_corners, _ck_goal_deliveries_df, "⭐ Corner → Goal (Delivery)", "#00ff85", width=3, arrows=True)
                                     if "⭐ Goal" in _corn_filter and not _ck_goal_only.empty:
                                         fig_corners.add_trace(go.Scatter(
                                             x=_ck_goal_only['x'], y=_ck_goal_only['y'], mode='markers',
@@ -2347,6 +2356,14 @@ for mgr_idx, manager in enumerate(managers):
                                     for _, _s in _follow.iterrows():
                                         _fk_shot_rows.append(_s)
                                 _fk_indirect = pd.DataFrame(_fk_shot_rows).drop_duplicates(subset=['Index']) if _fk_shot_rows else pd.DataFrame()
+                                # FK pass deliveries that preceded an indirect goal
+                                _fk_indirect_goals = _fk_indirect[_fk_indirect['Type'] == 16] if not _fk_indirect.empty else pd.DataFrame()
+                                _fk_goal_delivery_rows = []
+                                for _, _goal_row in _fk_indirect_goals.iterrows():
+                                    _prec_fk = free_kicks[(free_kicks['Index'] < _goal_row['Index']) & (free_kicks['Index'] >= _goal_row['Index'] - 8)]
+                                    for _, _fkr in _prec_fk.iterrows():
+                                        _fk_goal_delivery_rows.append(_fkr)
+                                _fk_goal_deliveries_df = pd.DataFrame(_fk_goal_delivery_rows).drop_duplicates(subset=['Index']) if _fk_goal_delivery_rows else pd.DataFrame()
                                 # Union indirect + direct, deduplicate by event index
                                 _fk_shots_df = pd.concat(
                                     [df for df in [_fk_indirect, _fk_direct] if not df.empty]
@@ -2396,6 +2413,8 @@ for mgr_idx, manager in enumerate(managers):
                                                                          _fk_shot_only['xG'].round(3)]),
                                             hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>xG: %{customdata[2]}<extra></extra>"
                                         ))
+                                    if "⭐ Goal" in _fk_filter and not _fk_goal_deliveries_df.empty:
+                                        _add_plotly_action_lines(fig_fk, _fk_goal_deliveries_df, "⭐ FK → Goal (Delivery)", "#00ff85", width=3, arrows=True)
                                     if "⭐ Goal" in _fk_filter and not _fk_goal_only.empty:
                                         fig_fk.add_trace(go.Scatter(
                                             x=_fk_goal_only['x'], y=_fk_goal_only['y'], mode='markers',
