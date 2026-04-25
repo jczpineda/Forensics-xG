@@ -824,15 +824,7 @@ for mgr_idx, manager in enumerate(managers):
                             (plot_df['Outcome'] == 'Successful') &
                             ((plot_df['endX'] - plot_df['x']) >= 10)
                         ]
-                        zone14_passes = plot_df[
-                            (plot_df['Type'] == 1) &
-                            (plot_df['Outcome'] == 'Successful') &
-                            (plot_df['endX'].between(65, 85)) &
-                            (plot_df['endY'].between(37, 63))
-                        ]
-
                         prog_leaders = prog_passes.groupby('Player').size().reset_index(name='Progressive Passes').sort_values('Progressive Passes', ascending=False)
-                        z14_leaders = zone14_passes.groupby('Player').size().reset_index(name='Zone 14 Passes').sort_values('Zone 14 Passes', ascending=False)
 
                         st.divider()
                         st.markdown("#### 🗂️ Select Evidence Layers")
@@ -847,7 +839,7 @@ for mgr_idx, manager in enumerate(managers):
                             "Defensive Actions Map", "Defensive Shield (Heatmap + Line)"
                         ]
                         attacking_phase_options = [
-                            "Actions Leading to Shots", "Creator Map (Shot Assists)",
+                            "Actions Leading to Shots",
                             "Zone 14 & Half-Spaces", "Zone Invasions",
                             "Average Attacking & Defending Positions"
                         ]
@@ -1520,64 +1512,152 @@ for mgr_idx, manager in enumerate(managers):
                             else:
                                 st.info("No shot actions available for current filters.")
 
-                        if "Creator Map (Shot Assists)" in modules:
-                            st.subheader("⚔️ Creator Map (Shot Assists)")
-                            shots_for_assists = viz_df[viz_df['Type'].isin([13, 14, 15, 16])]
-                            key_passes = []
-                            for _, shot in shots_for_assists.iterrows():
-                                prev = viz_df[(viz_df['Index'] < shot['Index']) & (viz_df['Index'] >= shot['Index'] - 5)]
-                                prev_pass = prev[(prev['Type'] == 1) & (prev['Outcome'] == 'Successful')]
-                                if not prev_pass.empty:
-                                    key_passes.append(prev_pass.iloc[-1])
-                            if key_passes:
-                                kp_df = pd.DataFrame(key_passes)
-                                _mc1, _mc2 = st.columns(2)
-                                _mc1.metric("Key Passes", len(kp_df))
-                                _mc2.metric("Creators", kp_df['Player'].nunique())
-                                fig_l_creator = _make_plotly_pitch("Creator Map — passes directly preceding a shot")
-                                _add_plotly_action_lines(fig_l_creator, kp_df, "Key Pass", "#00ffff", width=2, arrows=True)
-                                st.plotly_chart(fig_l_creator, use_container_width=True)
-                                creator_leaders = kp_df.groupby('Player').size().reset_index(name='Key Passes').sort_values('Key Passes', ascending=False)
-                                if not creator_leaders.empty:
-                                    with st.expander("👥 Creator Leaders"):
-                                        fig_crl = px.bar(creator_leaders.head(8).sort_values('Key Passes'), x='Key Passes', y='Player', orientation='h', template='plotly_dark')
-                                        fig_crl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
-                                        st.plotly_chart(fig_crl, use_container_width=True)
-                            else:
-                                st.info("No key-pass actions available for current filters.")
-
                         if "Zone 14 & Half-Spaces" in modules:
                             st.subheader("⚔️ Zone 14 and Half-Spaces")
-                            _z14_c = len(viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful') & viz_df['endX'].between(65,85) & viz_df['endY'].between(37,63)])
-                            _lhs_c = len(viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful') & viz_df['endX'].between(65,85) & viz_df['endY'].between(20,37)])
-                            _rhs_c = len(viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful') & viz_df['endX'].between(65,85) & viz_df['endY'].between(63,80)])
-                            _mc1, _mc2, _mc3 = st.columns(3)
-                            _mc1.metric("🟡 Zone 14 Entries", _z14_c)
-                            _mc2.metric("🔴 Left Half-Space", _lhs_c)
-                            _mc3.metric("🔴 Right Half-Space", _rhs_c)
+
+                            # Zone boundaries: (label, xmin, xmax, ymin, ymax, colour)
+                            _zone_defs = [
+                                ('Zone 14',          65, 85, 37, 63, '#ffd700'),
+                                ('Left Half-Space',  65, 85, 20, 37, '#ff4b4b'),
+                                ('Right Half-Space', 65, 85, 63, 80, '#ff4b4b'),
+                            ]
+
+                            def _in_any_zone(df, xc, yc):
+                                mask = pd.Series(False, index=df.index)
+                                for _, xmin, xmax, ymin, ymax, _ in _zone_defs:
+                                    mask |= df[xc].between(xmin, xmax) & df[yc].between(ymin, ymax)
+                                return df[mask].copy()
+
+                            def _assign_zone(df, xc, yc):
+                                def _lbl(r):
+                                    for lbl, xmin, xmax, ymin, ymax, _ in _zone_defs:
+                                        if xmin <= r[xc] <= xmax and ymin <= r[yc] <= ymax:
+                                            return lbl
+                                    return 'Other'
+                                df['Zone'] = df.apply(_lbl, axis=1)
+                                return df
+
+                            # Passes whose endpoint lands in a zone
+                            _z_passes = _in_any_zone(viz_df[viz_df['Type'] == 1].copy(), 'endX', 'endY')
+                            _z_passes['Outcome'] = _z_passes['Outcome'].fillna('Unsuccessful')
+                            _z_passes = _assign_zone(_z_passes, 'endX', 'endY')
+                            _z_pass_succ = _z_passes[_z_passes['Outcome'] == 'Successful']
+                            _z_pass_fail = _z_passes[_z_passes['Outcome'] != 'Successful']
+
+                            # Dribbles / carries whose endpoint lands in a zone
+                            _z_carries = _in_any_zone(viz_df[viz_df['Type'] == 3].copy(), 'endX', 'endY')
+                            _z_carries['Outcome'] = _z_carries['Outcome'].fillna('Successful')
+                            _z_carries = _assign_zone(_z_carries, 'endX', 'endY')
+                            _z_carry_succ = _z_carries[_z_carries['Outcome'] == 'Successful']
+                            _z_carry_fail = _z_carries[_z_carries['Outcome'] != 'Successful']
+
+                            # Shots taken from within the zones (use start position)
+                            _z_shots = _in_any_zone(viz_df[viz_df['Type'].isin([13, 14, 15, 16])].copy(), 'x', 'y')
+                            _z_shots['Outcome'] = _z_shots['Outcome'].fillna('Unknown')
+                            _z_shots = _assign_zone(_z_shots, 'x', 'y')
+
+                            # Metrics row
+                            _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                            _mc1.metric("📬 Passes into Zones", len(_z_passes))
+                            _mc2.metric("✅ Successful Passes", len(_z_pass_succ))
+                            _mc3.metric("🟣 Dribbles into Zones", len(_z_carries))
+                            _mc4.metric("🎯 Shots from Zones", len(_z_shots))
+
+                            # Pitch map
                             fig_l_zones = _make_plotly_pitch("Zone 14 🟡 · Left Half-Space 🔴 · Right Half-Space 🔴")
-                            zone_defs = [
-                                ('Zone 14', 65, 85, 37, 63, '#ffd700'),
-                                ('LHS', 65, 85, 20, 37, '#ff4b4b'),
-                                ('RHS', 65, 85, 63, 80, '#ff4b4b'),
-                            ]
-                            for _, xmin, xmax, ymin, ymax, color in zone_defs:
-                                fig_l_zones.add_shape(type='rect', x0=xmin, y0=ymin, x1=xmax, y1=ymax,
-                                                      line=dict(color='white', width=1), fillcolor=color, opacity=0.15)
-                            zone_entries = viz_df[(viz_df['Type'] == 1) & (viz_df['Outcome'] == 'Successful')]
-                            zone_entries = zone_entries[
-                                ((zone_entries['endX'].between(65, 85)) & (zone_entries['endY'].between(37, 63))) |
-                                ((zone_entries['endX'].between(65, 85)) & (zone_entries['endY'].between(20, 37))) |
-                                ((zone_entries['endX'].between(65, 85)) & (zone_entries['endY'].between(63, 80)))
-                            ]
-                            if not zone_entries.empty:
-                                _add_plotly_action_lines(fig_l_zones, zone_entries, "Zone Entry", "#ffffff", width=2)
+                            for _zlbl, xmin, xmax, ymin, ymax, zcolor in _zone_defs:
+                                fig_l_zones.add_shape(
+                                    type='rect', x0=xmin, y0=ymin, x1=xmax, y1=ymax,
+                                    line=dict(color='white', width=1), fillcolor=zcolor, opacity=0.15
+                                )
+                            if not _z_pass_succ.empty:
+                                _add_plotly_action_lines(fig_l_zones, _z_pass_succ, "✅ Pass (Successful)", "#00ff85", width=2, arrows=True)
+                            if not _z_pass_fail.empty:
+                                _add_plotly_action_lines(fig_l_zones, _z_pass_fail, "❌ Pass (Unsuccessful)", "#ff4b4b", width=2, dash='dot', arrows=True)
+                            if not _z_carry_succ.empty:
+                                _add_plotly_action_lines(fig_l_zones, _z_carry_succ, "🟣 Dribble (Successful)", "#a855f7", width=2)
+                            if not _z_carry_fail.empty:
+                                _add_plotly_action_lines(fig_l_zones, _z_carry_fail, "⚠️ Dribble (Unsuccessful)", "#ff9900", width=2, dash='dot')
+                            if not _z_shots.empty:
+                                _shot_type_sym = {16: 'star', 13: 'circle', 14: 'square', 15: 'x'}
+                                _z_shot_sym = _z_shots['Type'].map(_shot_type_sym).fillna('circle').tolist()
+                                _z_shot_custom = np.column_stack([
+                                    _z_shots['Player'].astype(str),
+                                    _z_shots['Minute'].astype(int),
+                                    _z_shots['Outcome'].astype(str),
+                                    _z_shots['Zone'].astype(str),
+                                ])
+                                fig_l_zones.add_trace(go.Scatter(
+                                    x=_z_shots['x'], y=_z_shots['y'], mode='markers',
+                                    marker=dict(color='#ff6b6b', size=10, symbol=_z_shot_sym,
+                                                line=dict(color='white', width=1)),
+                                    name='💥 Shot',
+                                    customdata=_z_shot_custom,
+                                    hovertemplate=(
+                                        "<b>%{customdata[0]}</b><br>"
+                                        "Minute: %{customdata[1]}'<br>"
+                                        "Outcome: %{customdata[2]}<br>"
+                                        "Zone: %{customdata[3]}<extra></extra>"
+                                    ),
+                                ))
                             st.plotly_chart(fig_l_zones, use_container_width=True)
-                            if not z14_leaders.empty:
-                                with st.expander("👥 Zone Entry Leaders"):
-                                    fig_zel = px.bar(z14_leaders.head(8).sort_values('Zone 14 Passes'), x='Zone 14 Passes', y='Player', orientation='h', template='plotly_dark')
-                                    fig_zel.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
-                                    st.plotly_chart(fig_zel, use_container_width=True)
+
+                            # Player zone activity breakdown
+                            _z_all_players = set()
+                            for _zdf in [_z_passes, _z_carries, _z_shots]:
+                                if not _zdf.empty:
+                                    _z_all_players.update(_zdf['Player'].unique())
+
+                            if _z_all_players:
+                                with st.expander("👥 Player Zone Activity"):
+                                    _z_rows = []
+                                    for _pl in sorted(_z_all_players):
+                                        _ps = len(_z_pass_succ[_z_pass_succ['Player'] == _pl]) if not _z_pass_succ.empty else 0
+                                        _pf = len(_z_pass_fail[_z_pass_fail['Player'] == _pl]) if not _z_pass_fail.empty else 0
+                                        _ds = len(_z_carry_succ[_z_carry_succ['Player'] == _pl]) if not _z_carry_succ.empty else 0
+                                        _df2 = len(_z_carry_fail[_z_carry_fail['Player'] == _pl]) if not _z_carry_fail.empty else 0
+                                        _sh = len(_z_shots[_z_shots['Player'] == _pl]) if not _z_shots.empty else 0
+                                        _z_rows.append({
+                                            'Player':         _pl,
+                                            'Pass ✅':        _ps,
+                                            'Pass ❌':        _pf,
+                                            'Dribble ✅':     _ds,
+                                            'Dribble ❌':     _df2,
+                                            'Shots':          _sh,
+                                            'Total':          _ps + _pf + _ds + _df2 + _sh,
+                                        })
+                                    _z_player_df = pd.DataFrame(_z_rows).sort_values('Total', ascending=False)
+                                    _zpz1, _zpz2 = st.columns(2)
+                                    with _zpz1:
+                                        _z_bar_df = _z_player_df.melt(
+                                            id_vars=['Player'],
+                                            value_vars=['Pass ✅', 'Pass ❌', 'Dribble ✅', 'Dribble ❌', 'Shots'],
+                                            var_name='Action', value_name='Count'
+                                        )
+                                        _z_bar_df = _z_bar_df[_z_bar_df['Count'] > 0]
+                                        _z_color_map = {
+                                            'Pass ✅':    '#00ff85',
+                                            'Pass ❌':    '#ff4b4b',
+                                            'Dribble ✅': '#a855f7',
+                                            'Dribble ❌': '#ff9900',
+                                            'Shots':      '#ff6b6b',
+                                        }
+                                        fig_z_bar = px.bar(
+                                            _z_bar_df, x='Count', y='Player', color='Action',
+                                            orientation='h', color_discrete_map=_z_color_map,
+                                            template='plotly_dark', title='Zone Actions by Player',
+                                            barmode='stack'
+                                        )
+                                        fig_z_bar.update_layout(
+                                            height=max(260, len(_z_all_players) * 28),
+                                            margin=dict(l=0, r=0, t=30, b=0)
+                                        )
+                                        st.plotly_chart(fig_z_bar, use_container_width=True)
+                                    with _zpz2:
+                                        st.dataframe(
+                                            _z_player_df.reset_index(drop=True),
+                                            use_container_width=True, hide_index=True
+                                        )
 
                         if "Zone Invasions" in modules:
                             st.subheader("⚔️ Zone Invasions")
