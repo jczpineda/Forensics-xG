@@ -565,11 +565,11 @@ def _make_plotly_pitch(title):
     )
     # Attack direction arrow (left goal → right goal)
     fig.add_annotation(
-        x=80, y=-1.2, ax=20, ay=-1.2,
-        text="Attack Direction",
-        showarrow=True, arrowhead=3, arrowwidth=2,
-        arrowcolor='rgba(255,255,255,0.5)',
-        font=dict(color='rgba(255,255,255,0.5)', size=10),
+        x=88, y=-1.5, ax=12, ay=-1.5,
+        text="►  Attack Direction",
+        showarrow=True, arrowhead=4, arrowwidth=3,
+        arrowcolor='#ffd700',
+        font=dict(color='#ffd700', size=12, family='Arial Black'),
         xref='x', yref='y', axref='x', ayref='y',
     )
     return fig
@@ -816,8 +816,7 @@ for mgr_idx, manager in enumerate(managers):
                             "Average Attacking & Defending Positions", "Match Progression"
                         ]
                         out_pos_options = [
-                            "Defensive Actions Map", "Defensive Shield (Heatmap + Line)",
-                            "Defensive Actions"
+                            "Defensive Actions Map", "Defensive Shield (Heatmap + Line)"
                         ]
                         attacking_phase_options = [
                             "Actions Leading to Shots", "Creator Map (Shot Assists)",
@@ -1156,7 +1155,7 @@ for mgr_idx, manager in enumerate(managers):
                                 _mc2.metric("🟠 Interceptions", _n_int)
                                 _mc3.metric("⬜ Clearances", _n_clr)
                                 _mc4.metric("🔴 Fouls", _n_foul)
-                                fig_dm = _make_plotly_pitch("Defensive Actions — 🔵 Tackle · 🟠 Interception · ⬜ Clearance · 🔴 Foul")
+                                fig_dm = _make_plotly_pitch("Defensive Actions")
                                 for action, color, symbol in [
                                     ('Tackle', '#00a3ff', 'diamond'),
                                     ('Interception', '#ff9900', 'square'),
@@ -1206,42 +1205,6 @@ for mgr_idx, manager in enumerate(managers):
                                         st.plotly_chart(fig_dsl, use_container_width=True)
                             else:
                                 st.info("No defensive actions to render.")
-
-                        if "Defensive Actions" in modules:
-                            st.subheader("🔴 Defensive Actions")
-                            def_act = viz_df[viz_df['Type'].isin([4, 7, 8, 12])].copy()
-                            if not def_act.empty:
-                                def_act['DefAction'] = def_act['Type'].map({4: 'Foul', 7: 'Tackle', 8: 'Interception', 12: 'Clearance'})
-                                _mc1, _mc2, _mc3, _mc4 = st.columns(4)
-                                _mc1.metric("🔵 Tackles", len(def_act[def_act['DefAction'] == 'Tackle']))
-                                _mc2.metric("🟠 Interceptions", len(def_act[def_act['DefAction'] == 'Interception']))
-                                _mc3.metric("⬜ Clearances", len(def_act[def_act['DefAction'] == 'Clearance']))
-                                _mc4.metric("🔴 Fouls", len(def_act[def_act['DefAction'] == 'Foul']))
-                                fig_l_def = _make_plotly_pitch("Defensive Actions — 🔵 Tackle · 🟠 Interception · ⬜ Clearance · 🔴 Foul")
-                                for action, color, symbol in [
-                                    ('Tackle', '#3399ff', 'diamond'),
-                                    ('Interception', '#ff9900', 'square'),
-                                    ('Clearance', '#cbd5e1', 'triangle-up'),
-                                    ('Foul', '#ff4b4b', 'x')
-                                ]:
-                                    adf = def_act[def_act['DefAction'] == action]
-                                    if adf.empty:
-                                        continue
-                                    fig_l_def.add_trace(go.Scatter(
-                                        x=adf['x'], y=adf['y'], mode='markers', name=action,
-                                        marker=dict(color=color, symbol=symbol, size=10, line=dict(color='white', width=1)),
-                                        customdata=np.column_stack([adf['Player'], adf['Minute']]),
-                                        hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<extra></extra>"
-                                    ))
-                                st.plotly_chart(fig_l_def, use_container_width=True)
-                                def_leg_leaders = def_act.groupby('Player').size().reset_index(name='Def Actions').sort_values('Def Actions', ascending=False)
-                                if not def_leg_leaders.empty:
-                                    with st.expander("👥 Defensive Leaders"):
-                                        fig_dll = px.bar(def_leg_leaders.head(8).sort_values('Def Actions'), x='Def Actions', y='Player', orientation='h', template='plotly_dark')
-                                        fig_dll.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
-                                        st.plotly_chart(fig_dll, use_container_width=True)
-                            else:
-                                st.info("No defensive actions available for current filters.")
 
                         # --- Attacking Phase ---
                         if "Actions Leading to Shots" in modules:
