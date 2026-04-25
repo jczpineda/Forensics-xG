@@ -1043,7 +1043,7 @@ for mgr_idx, manager in enumerate(managers):
                             opp_def_raw['x'] = 100 - opp_def_raw['x']
                             opp_def_raw['y'] = 100 - opp_def_raw['y']
                             # Apply same minute filter as viz_df
-                            opp_def_evts = opp_def_raw[(opp_def_raw['Minute'] >= min_minute) & (opp_def_raw['Minute'] <= max_minute)]
+                            opp_def_evts = opp_def_raw[(opp_def_raw['Minute'] >= min_range[0]) & (opp_def_raw['Minute'] <= min_range[1])]
                             _mc1, _mc2, _mc3, _mc4 = st.columns(4)
                             _mc1.metric(f"🟢 {sel_team} Att. Actions", len(att_evts))
                             _mc2.metric(f"🔴 {opp_team} Def. Actions", len(opp_def_evts))
