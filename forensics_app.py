@@ -1666,38 +1666,159 @@ for mgr_idx, manager in enumerate(managers):
 
                         if "Zone Invasions" in modules:
                             st.subheader("⚔️ Zone Invasions")
-                            final_third_inv = viz_df[
-                                (viz_df['Type'].isin([1, 3])) & (viz_df['Outcome'] == 'Successful') &
-                                (viz_df['endX'] > 66.7) & (viz_df['x'] <= 66.7)
-                            ].copy()
-                            box_entries_inv = viz_df[
-                                (viz_df['Type'].isin([1, 3])) & (viz_df['Outcome'] == 'Successful') &
-                                (viz_df['endX'] > 83) & (viz_df['endY'].between(21, 79)) &
-                                ~((viz_df['x'] > 83) & (viz_df['y'].between(21, 79)))
-                            ].copy()
-                            if not final_third_inv.empty or not box_entries_inv.empty:
-                                _mc1, _mc2, _mc3 = st.columns(3)
-                                _mc1.metric("🟡 Final Third Entries", len(final_third_inv))
-                                _mc2.metric("🔴 Box Entries", len(box_entries_inv))
-                                _inv_all_tmp = pd.concat([final_third_inv, box_entries_inv]).drop_duplicates(subset=['Index'])
-                                _mc3.metric("Players Invading", _inv_all_tmp['Player'].nunique())
-                                fig_zi = _make_plotly_pitch("Zone Invasions — 🟡 Final Third · 🔴 Box Entries")
-                                fig_zi.add_shape(type='rect', x0=66.7, y0=0, x1=100, y1=100, line=dict(color='#ffd700', width=1.5, dash='dot'), fillcolor='rgba(255,215,0,0.05)')
-                                fig_zi.add_shape(type='rect', x0=83, y0=21, x1=100, y1=79, line=dict(color='#ff4b4b', width=2), fillcolor='rgba(255,75,75,0.07)')
-                                if not final_third_inv.empty:
-                                    _add_plotly_action_lines(fig_zi, final_third_inv, "🟡 Final Third Entry", "#ffd700", width=2)
-                                if not box_entries_inv.empty:
-                                    _add_plotly_action_lines(fig_zi, box_entries_inv, "🔴 Box Entry", "#ff4b4b", width=2)
-                                st.plotly_chart(fig_zi, use_container_width=True)
-                                inv_all = pd.concat([final_third_inv, box_entries_inv]).drop_duplicates(subset=['Index'])
-                                inv_leaders = inv_all.groupby('Player').size().reset_index(name='Zone Invasions').sort_values('Zone Invasions', ascending=False)
-                                if not inv_leaders.empty:
-                                    with st.expander("👥 Zone Invasion Leaders"):
-                                        fig_zil = px.bar(inv_leaders.head(8).sort_values('Zone Invasions'), x='Zone Invasions', y='Player', orientation='h', template='plotly_dark')
-                                        fig_zil.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
-                                        st.plotly_chart(fig_zil, use_container_width=True)
-                            else:
-                                st.info("No zone invasion actions found in this range.")
+
+                            # --- Final Third: any action whose endpoint crosses into x > 66.7 ---
+                            def _ft_mask(df):
+                                return (df['endX'] > 66.7) & (df['x'] <= 66.7)
+
+                            def _box_mask(df):
+                                return (df['endX'] > 83) & (df['endY'].between(21, 79)) & \
+                                       ~((df['x'] > 83) & (df['y'].between(21, 79)))
+
+                            # Passes
+                            _inv_pass_all = viz_df[viz_df['Type'] == 1].copy()
+                            _inv_pass_all['Outcome'] = _inv_pass_all['Outcome'].fillna('Unsuccessful')
+                            _inv_ft_pass_s  = _inv_pass_all[_ft_mask(_inv_pass_all) & (_inv_pass_all['Outcome'] == 'Successful')]
+                            _inv_ft_pass_f  = _inv_pass_all[_ft_mask(_inv_pass_all) & (_inv_pass_all['Outcome'] != 'Successful')]
+                            _inv_box_pass_s = _inv_pass_all[_box_mask(_inv_pass_all) & (_inv_pass_all['Outcome'] == 'Successful')]
+                            _inv_box_pass_f = _inv_pass_all[_box_mask(_inv_pass_all) & (_inv_pass_all['Outcome'] != 'Successful')]
+
+                            # Dribbles / carries
+                            _inv_carry_all = viz_df[viz_df['Type'] == 3].copy()
+                            _inv_carry_all['Outcome'] = _inv_carry_all['Outcome'].fillna('Successful')
+                            _inv_ft_carry_s  = _inv_carry_all[_ft_mask(_inv_carry_all) & (_inv_carry_all['Outcome'] == 'Successful')]
+                            _inv_ft_carry_f  = _inv_carry_all[_ft_mask(_inv_carry_all) & (_inv_carry_all['Outcome'] != 'Successful')]
+                            _inv_box_carry_s = _inv_carry_all[_box_mask(_inv_carry_all) & (_inv_carry_all['Outcome'] == 'Successful')]
+                            _inv_box_carry_f = _inv_carry_all[_box_mask(_inv_carry_all) & (_inv_carry_all['Outcome'] != 'Successful')]
+
+                            # Shots taken from Final Third or Box
+                            _inv_shots = viz_df[viz_df['Type'].isin([13, 14, 15, 16])].copy()
+                            _inv_shots['Outcome'] = _inv_shots['Outcome'].fillna('Unknown')
+                            _inv_shots_ft  = _inv_shots[_inv_shots['x'] > 66.7]
+                            _inv_shots_box = _inv_shots[_inv_shots['x'] > 83 & _inv_shots['y'].between(21, 79)]
+                            _inv_shots_all = pd.concat([_inv_shots_ft, _inv_shots_box]).drop_duplicates(subset=['Index']) if not (_inv_shots_ft.empty and _inv_shots_box.empty) else pd.DataFrame()
+
+                            # Combined action counts per zone for metrics
+                            _ft_all_idx  = pd.concat([_inv_ft_pass_s,  _inv_ft_pass_f,  _inv_ft_carry_s,  _inv_ft_carry_f]).drop_duplicates(subset=['Index'])  if any(not d.empty for d in [_inv_ft_pass_s, _inv_ft_pass_f, _inv_ft_carry_s, _inv_ft_carry_f]) else pd.DataFrame()
+                            _box_all_idx = pd.concat([_inv_box_pass_s, _inv_box_pass_f, _inv_box_carry_s, _inv_box_carry_f]).drop_duplicates(subset=['Index']) if any(not d.empty for d in [_inv_box_pass_s, _inv_box_pass_f, _inv_box_carry_s, _inv_box_carry_f]) else pd.DataFrame()
+
+                            _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                            _mc1.metric("🟡 Final Third Actions", len(_ft_all_idx))
+                            _mc2.metric("🔴 Box Actions", len(_box_all_idx))
+                            _mc3.metric("🎯 Shots in Zones", len(_inv_shots_all) if not _inv_shots_all.empty else 0)
+                            _all_inv_players = set()
+                            for _d in [_ft_all_idx, _box_all_idx]:
+                                if not _d.empty:
+                                    _all_inv_players.update(_d['Player'].unique())
+                            _mc4.metric("👤 Players", len(_all_inv_players))
+
+                            fig_zi = _make_plotly_pitch("Zone Invasions — 🟡 Final Third · 🔴 Box Entries")
+                            fig_zi.update_layout(
+                                legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5,
+                                            bgcolor='rgba(14,17,23,0.7)', bordercolor='#444', borderwidth=1),
+                                margin=dict(l=10, r=10, t=45, b=60),
+                            )
+                            fig_zi.add_shape(type='rect', x0=66.7, y0=0, x1=100, y1=100,
+                                            line=dict(color='#ffd700', width=1.5, dash='dot'),
+                                            fillcolor='rgba(255,215,0,0.05)')
+                            fig_zi.add_shape(type='rect', x0=83, y0=21, x1=100, y1=79,
+                                            line=dict(color='#ff4b4b', width=2),
+                                            fillcolor='rgba(255,75,75,0.07)')
+
+                            # Passes — arrows
+                            if not _inv_ft_pass_s.empty:
+                                _add_plotly_action_lines(fig_zi, _inv_ft_pass_s,  "✅ Pass → Final Third",  "#00ff85", width=2, arrows=True)
+                            if not _inv_ft_pass_f.empty:
+                                _add_plotly_action_lines(fig_zi, _inv_ft_pass_f,  "❌ Pass → Final Third",  "#ff4b4b", width=2, dash='dot', arrows=True)
+                            if not _inv_box_pass_s.empty:
+                                _add_plotly_action_lines(fig_zi, _inv_box_pass_s, "✅ Pass → Box",          "#ffd700", width=2, arrows=True)
+                            if not _inv_box_pass_f.empty:
+                                _add_plotly_action_lines(fig_zi, _inv_box_pass_f, "❌ Pass → Box",          "#ff9900", width=2, dash='dot', arrows=True)
+                            # Dribbles — solid/dotted lines
+                            if not _inv_ft_carry_s.empty:
+                                _add_plotly_action_lines(fig_zi, _inv_ft_carry_s,  "🟣 Dribble → Final Third ✅", "#a855f7", width=2)
+                            if not _inv_ft_carry_f.empty:
+                                _add_plotly_action_lines(fig_zi, _inv_ft_carry_f,  "⚠️ Dribble → Final Third ❌", "#c084fc", width=2, dash='dot')
+                            if not _inv_box_carry_s.empty:
+                                _add_plotly_action_lines(fig_zi, _inv_box_carry_s, "🟣 Dribble → Box ✅",         "#e879f9", width=2)
+                            if not _inv_box_carry_f.empty:
+                                _add_plotly_action_lines(fig_zi, _inv_box_carry_f, "⚠️ Dribble → Box ❌",         "#f0abfc", width=2, dash='dot')
+                            # Shots
+                            if not _inv_shots_all.empty:
+                                _inv_shot_sym_map = {16: 'star', 13: 'circle', 14: 'square', 15: 'x'}
+                                _inv_shot_syms = _inv_shots_all['Type'].map(_inv_shot_sym_map).fillna('circle').tolist()
+                                _inv_shot_custom = np.column_stack([
+                                    _inv_shots_all['Player'].astype(str),
+                                    _inv_shots_all['Minute'].astype(int),
+                                    _inv_shots_all['Outcome'].astype(str),
+                                ])
+                                fig_zi.add_trace(go.Scatter(
+                                    x=_inv_shots_all['x'], y=_inv_shots_all['y'], mode='markers',
+                                    marker=dict(color='#ff6b6b', size=10, symbol=_inv_shot_syms,
+                                                line=dict(color='white', width=1)),
+                                    name='💥 Shot',
+                                    customdata=_inv_shot_custom,
+                                    hovertemplate=(
+                                        "<b>%{customdata[0]}</b><br>"
+                                        "Minute: %{customdata[1]}'<br>"
+                                        "Outcome: %{customdata[2]}<extra></extra>"
+                                    ),
+                                ))
+                            st.plotly_chart(fig_zi, use_container_width=True)
+
+                            # Player breakdown expander
+                            if _all_inv_players:
+                                with st.expander("👥 Player Zone Invasion Breakdown"):
+                                    _inv_rows = []
+                                    for _pl in sorted(_all_inv_players):
+                                        def _cnt(df): return len(df[df['Player'] == _pl]) if not df.empty else 0
+                                        _inv_rows.append({
+                                            'Player':              _pl,
+                                            'FT Pass ✅':          _cnt(_inv_ft_pass_s),
+                                            'FT Pass ❌':          _cnt(_inv_ft_pass_f),
+                                            'Box Pass ✅':         _cnt(_inv_box_pass_s),
+                                            'Box Pass ❌':         _cnt(_inv_box_pass_f),
+                                            'FT Dribble ✅':       _cnt(_inv_ft_carry_s),
+                                            'FT Dribble ❌':       _cnt(_inv_ft_carry_f),
+                                            'Box Dribble ✅':      _cnt(_inv_box_carry_s),
+                                            'Box Dribble ❌':      _cnt(_inv_box_carry_f),
+                                            'Shots':               _cnt(_inv_shots_all) if not _inv_shots_all.empty else 0,
+                                        })
+                                    _inv_player_df = pd.DataFrame(_inv_rows)
+                                    _inv_player_df['Total'] = _inv_player_df.iloc[:, 1:].sum(axis=1)
+                                    _inv_player_df = _inv_player_df.sort_values('Total', ascending=False)
+                                    _inv_bar_df = _inv_player_df.melt(
+                                        id_vars=['Player'],
+                                        value_vars=['FT Pass ✅', 'FT Pass ❌', 'Box Pass ✅', 'Box Pass ❌',
+                                                    'FT Dribble ✅', 'FT Dribble ❌', 'Box Dribble ✅', 'Box Dribble ❌', 'Shots'],
+                                        var_name='Action', value_name='Count'
+                                    )
+                                    _inv_bar_df = _inv_bar_df[_inv_bar_df['Count'] > 0]
+                                    _inv_color_map = {
+                                        'FT Pass ✅':     '#00ff85', 'FT Pass ❌':     '#ff4b4b',
+                                        'Box Pass ✅':    '#ffd700', 'Box Pass ❌':    '#ff9900',
+                                        'FT Dribble ✅':  '#a855f7', 'FT Dribble ❌':  '#c084fc',
+                                        'Box Dribble ✅': '#e879f9', 'Box Dribble ❌': '#f0abfc',
+                                        'Shots':          '#ff6b6b',
+                                    }
+                                    _zpz1, _zpz2 = st.columns(2)
+                                    with _zpz1:
+                                        fig_zi_bar = px.bar(
+                                            _inv_bar_df, x='Count', y='Player', color='Action',
+                                            orientation='h', color_discrete_map=_inv_color_map,
+                                            template='plotly_dark', title='Zone Invasion Actions by Player',
+                                            barmode='stack'
+                                        )
+                                        fig_zi_bar.update_layout(
+                                            height=max(260, len(_all_inv_players) * 28),
+                                            margin=dict(l=0, r=0, t=30, b=0)
+                                        )
+                                        st.plotly_chart(fig_zi_bar, use_container_width=True)
+                                    with _zpz2:
+                                        st.dataframe(
+                                            _inv_player_df.reset_index(drop=True),
+                                            use_container_width=True, hide_index=True
+                                        )
 
                         # --- Attacking Transition ---
                         if "Progression Trajectory Lines" in modules:
