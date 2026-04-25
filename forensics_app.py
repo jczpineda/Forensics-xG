@@ -1036,35 +1036,42 @@ for mgr_idx, manager in enumerate(managers):
                                 st.info("No high-value passes found in this range.")
 
                         if "Average Attacking & Defending Positions" in modules:
-                            st.subheader("🟢 Average Attacking & Defending Positions")
+                            st.subheader("🟢 Avg Attacking Positions vs. Opposition Defensive Positions")
                             att_evts = viz_df[viz_df['Type'].isin([1, 3])]
-                            def_evts = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
+                            # Opposition defensive actions — flip x so both teams face same direction
+                            opp_def_raw = match_df[(match_df['Team'] == opp_team) & (match_df['Type'].isin([4, 7, 8, 12]))].copy()
+                            opp_def_raw['x'] = 100 - opp_def_raw['x']
+                            opp_def_raw['y'] = 100 - opp_def_raw['y']
+                            # Apply same minute filter as viz_df
+                            opp_def_evts = opp_def_raw[(opp_def_raw['Minute'] >= min_minute) & (opp_def_raw['Minute'] <= max_minute)]
                             _mc1, _mc2, _mc3, _mc4 = st.columns(4)
-                            _mc1.metric("🟢 Attacking Actions", len(att_evts))
-                            _mc2.metric("🔴 Defensive Actions", len(def_evts))
-                            _mc3.metric("Attacking Players", att_evts['Player'].nunique() if not att_evts.empty else 0)
-                            _mc4.metric("Defending Players", def_evts['Player'].nunique() if not def_evts.empty else 0)
-                            fig_avgpos = _make_plotly_pitch("Average Positions — 🟢 Attack (circle, sized by actions) · 🔴 Defend (diamond)")
+                            _mc1.metric(f"🟢 {sel_team} Att. Actions", len(att_evts))
+                            _mc2.metric(f"🔴 {opp_team} Def. Actions", len(opp_def_evts))
+                            _mc3.metric(f"{sel_team} Players", att_evts['Player'].nunique() if not att_evts.empty else 0)
+                            _mc4.metric(f"{opp_team} Players", opp_def_evts['Player'].nunique() if not opp_def_evts.empty else 0)
+                            fig_avgpos = _make_plotly_pitch(f"{sel_team} Avg Attack vs. {opp_team} Avg Defence")
                             if not att_evts.empty:
                                 att_avg = att_evts.groupby('Player')[['x', 'y']].mean().reset_index()
                                 att_cnts = att_evts.groupby('Player').size().reset_index(name='Actions')
                                 att_avg = att_avg.merge(att_cnts, on='Player')
                                 node_s = np.clip(att_avg['Actions'] * 1.5, 10, 35)
                                 fig_avgpos.add_trace(go.Scatter(
-                                    x=att_avg['x'], y=att_avg['y'], mode='markers+text', name='Avg Attack Pos',
+                                    x=att_avg['x'], y=att_avg['y'], mode='markers+text',
+                                    name=f'🟢 {sel_team} Attack',
                                     marker=dict(size=node_s, color='#00ff85', opacity=0.85, line=dict(color='white', width=1.5)),
                                     text=att_avg['Player'].str.split(' ').str[-1],
                                     textposition='top center', textfont=dict(color='#00ff85', size=9),
                                     customdata=np.column_stack([att_avg['Player'], att_avg['Actions']]),
                                     hovertemplate="<b>%{customdata[0]}</b><br>Avg Attack Pos<br>Actions: %{customdata[1]}<extra></extra>"
                                 ))
-                            if not def_evts.empty:
-                                def_avg = def_evts.groupby('Player')[['x', 'y']].mean().reset_index()
-                                def_cnts = def_evts.groupby('Player').size().reset_index(name='Actions')
+                            if not opp_def_evts.empty:
+                                def_avg = opp_def_evts.groupby('Player')[['x', 'y']].mean().reset_index()
+                                def_cnts = opp_def_evts.groupby('Player').size().reset_index(name='Actions')
                                 def_avg = def_avg.merge(def_cnts, on='Player')
                                 node_sd = np.clip(def_avg['Actions'] * 2, 10, 35)
                                 fig_avgpos.add_trace(go.Scatter(
-                                    x=def_avg['x'], y=def_avg['y'], mode='markers+text', name='Avg Defend Pos',
+                                    x=def_avg['x'], y=def_avg['y'], mode='markers+text',
+                                    name=f'🔴 {opp_team} Defence',
                                     marker=dict(size=node_sd, color='#ff4b4b', opacity=0.85, symbol='diamond', line=dict(color='white', width=1.5)),
                                     text=def_avg['Player'].str.split(' ').str[-1],
                                     textposition='bottom center', textfont=dict(color='#ff4b4b', size=9),
@@ -1072,12 +1079,21 @@ for mgr_idx, manager in enumerate(managers):
                                     hovertemplate="<b>%{customdata[0]}</b><br>Avg Defend Pos<br>Actions: %{customdata[1]}<extra></extra>"
                                 ))
                             st.plotly_chart(fig_avgpos, use_container_width=True)
-                            if not att_evts.empty:
-                                att_act_leaders = att_evts.groupby('Player').size().reset_index(name='Attacking Actions').sort_values('Attacking Actions', ascending=False)
-                                with st.expander("👥 Attacking Activity Leaders"):
-                                    fig_aal = px.bar(att_act_leaders.head(8).sort_values('Attacking Actions'), x='Attacking Actions', y='Player', orientation='h', template='plotly_dark')
-                                    fig_aal.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
-                                    st.plotly_chart(fig_aal, use_container_width=True)
+                            _exp1, _exp2 = st.columns(2)
+                            with _exp1:
+                                if not att_evts.empty:
+                                    att_act_leaders = att_evts.groupby('Player').size().reset_index(name='Attacking Actions').sort_values('Attacking Actions', ascending=False)
+                                    with st.expander(f"👥 {sel_team} Attacking Leaders"):
+                                        fig_aal = px.bar(att_act_leaders.head(8).sort_values('Attacking Actions'), x='Attacking Actions', y='Player', orientation='h', template='plotly_dark')
+                                        fig_aal.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_aal, use_container_width=True)
+                            with _exp2:
+                                if not opp_def_evts.empty:
+                                    opp_def_leaders = opp_def_evts.groupby('Player').size().reset_index(name='Defensive Actions').sort_values('Defensive Actions', ascending=False)
+                                    with st.expander(f"👥 {opp_team} Defensive Leaders"):
+                                        fig_odl = px.bar(opp_def_leaders.head(8).sort_values('Defensive Actions'), x='Defensive Actions', y='Player', orientation='h', template='plotly_dark', color_discrete_sequence=['#ff4b4b'])
+                                        fig_odl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                        st.plotly_chart(fig_odl, use_container_width=True)
 
                         if "Match Progression" in modules:
                             st.subheader("📈 Match Progression")
