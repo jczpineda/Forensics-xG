@@ -2332,8 +2332,10 @@ for mgr_idx, manager in enumerate(managers):
                         if "Free Kick Targeting" in modules:
                             st.subheader("🎯 Free Kick Targeting")
                             free_kicks = viz_df[(viz_df['Type'] == 1) & (viz_df['isFreeKick'])]
-                            if not free_kicks.empty:
-                                # Find shots/goals following each free kick (within 8 events, same team)
+                            # Direct FK shots (e.g. straight free kick goals) — Type 13-16 with isFkShot qualifier
+                            _fk_direct = viz_df[viz_df['isFkShot'] & viz_df['Type'].isin([13, 14, 15, 16])].copy()
+                            if not free_kicks.empty or not _fk_direct.empty:
+                                # Shots/goals following FK pass deliveries (indirect)
                                 _fk_shot_rows = []
                                 for _, _fkev in free_kicks.iterrows():
                                     _follow = match_df[
@@ -2344,7 +2346,11 @@ for mgr_idx, manager in enumerate(managers):
                                     ].sort_values('Index')
                                     for _, _s in _follow.iterrows():
                                         _fk_shot_rows.append(_s)
-                                _fk_shots_df = pd.DataFrame(_fk_shot_rows).drop_duplicates(subset=['Index']) if _fk_shot_rows else pd.DataFrame()
+                                _fk_indirect = pd.DataFrame(_fk_shot_rows).drop_duplicates(subset=['Index']) if _fk_shot_rows else pd.DataFrame()
+                                # Union indirect + direct, deduplicate by event index
+                                _fk_shots_df = pd.concat(
+                                    [df for df in [_fk_indirect, _fk_direct] if not df.empty]
+                                ).drop_duplicates(subset=['Index']) if (_fk_shot_rows or not _fk_direct.empty) else pd.DataFrame()
                                 _n_fk_shots = len(_fk_shots_df) if not _fk_shots_df.empty else 0
                                 _n_fk_goals = len(_fk_shots_df[_fk_shots_df['Type'] == 16]) if not _fk_shots_df.empty else 0
                                 _mc1, _mc2, _mc3, _mc4, _mc5 = st.columns(5)
@@ -2369,6 +2375,14 @@ for mgr_idx, manager in enumerate(managers):
                                     _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Successful'], "✅ Completed FK", "#00ffff", width=2, arrows=True)
                                 if "❌ Incomplete" in _fk_filter:
                                     _add_plotly_action_lines(fig_fk, free_kicks[free_kicks['Outcome'] == 'Unsuccessful'], "❌ Incomplete FK", "#ff4b4b", width=2, dash='dot', arrows=True)
+                                # Direct FK shots — draw their trajectory too
+                                if not _fk_direct.empty:
+                                    _fk_dir_shot_only = _fk_direct[_fk_direct['Type'].isin([13, 14, 15])]
+                                    _fk_dir_goal_only = _fk_direct[_fk_direct['Type'] == 16]
+                                    if "🟡 Shot" in _fk_filter and not _fk_dir_shot_only.empty:
+                                        _add_plotly_action_lines(fig_fk, _fk_dir_shot_only, "🟡 Direct FK Shot", "#ffd700", width=2, dash='dot', arrows=True)
+                                    if "⭐ Goal" in _fk_filter and not _fk_dir_goal_only.empty:
+                                        _add_plotly_action_lines(fig_fk, _fk_dir_goal_only, "⭐ Direct FK Goal", "#00ff85", width=3, arrows=True)
                                 if not _fk_shots_df.empty:
                                     _fk_shot_only = _fk_shots_df[_fk_shots_df['Type'].isin([13, 14, 15])]
                                     _fk_goal_only = _fk_shots_df[_fk_shots_df['Type'] == 16]
@@ -2400,7 +2414,7 @@ for mgr_idx, manager in enumerate(managers):
                                         fig_fkl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
                                         st.plotly_chart(fig_fkl, use_container_width=True)
                             else:
-                                st.info("No free kicks recorded in this range.")
+                                st.info("No free kick events recorded in this range.")
 
                         # --- Goalkeeping ---
                         if "Shot Trajectory Map (GK View)" in modules:
