@@ -813,7 +813,8 @@ for mgr_idx, manager in enumerate(managers):
                         in_pos_options = [
                             "Progressive Passes Map", "Passes into Zone 14", "Pass Map", "Passing Heatmap",
                             "Expected Threat (xT) Grid", "High Value Pass Map",
-                            "Average Attacking & Defending Positions", "Match Progression"
+                            "Average Attacking & Defending Positions", "Match Progression",
+                            "The Architect (Build-Up Phase)", "Passing Network (Structure)"
                         ]
                         out_pos_options = [
                             "Defensive Actions Map", "Defensive Shield (Heatmap + Line)"
@@ -834,11 +835,6 @@ for mgr_idx, manager in enumerate(managers):
                         gk_options = [
                             "Shot Trajectory Map (GK View)", "Goal Kick Direction Map"
                         ]
-                        legacy_options = [
-                            "The Architect (Build-Up Phase)",
-                            "Passing Network (Structure)"
-                        ]
-
                         row1_c1, row1_c2, row1_c3 = st.columns(3)
                         with row1_c1:
                             in_pos_mods = st.multiselect("🟢 In-Possession", in_pos_options, default=["Progressive Passes Map"], key=f"mip_{manager}")
@@ -855,15 +851,11 @@ for mgr_idx, manager in enumerate(managers):
                         with row2_c3:
                             set_mods = st.multiselect("🎯 Set-Pieces", set_options, key=f"msp_{manager}")
 
-                        row3_c1, row3_c2, row3_c3 = st.columns(3)
+                        row3_c1, _row3_c2, _row3_c3 = st.columns(3)
                         with row3_c1:
                             gk_mods = st.multiselect("🧤 Goalkeeping", gk_options, key=f"mgk_{manager}")
-                        with row3_c2:
-                            legacy_mods = st.multiselect("🧭 Classic Telemetry", legacy_options, key=f"mlg_{manager}")
-                        with row3_c3:
-                            st.caption("Classic maps now live inside Evidence Layers.")
 
-                        modules = in_pos_mods + out_pos_mods + attacking_phase_mods + att_trans_mods + def_trans_mods + set_mods + gk_mods + legacy_mods
+                        modules = in_pos_mods + out_pos_mods + attacking_phase_mods + att_trans_mods + def_trans_mods + set_mods + gk_mods
 
                         # Reusable transition pairing for defensive-transition modules
                         losses_base = plot_df[(plot_df['Type'].isin([1, 3])) & (plot_df['Outcome'] == 'Unsuccessful')].sort_values('Index')
@@ -1139,6 +1131,114 @@ for mgr_idx, manager in enumerate(managers):
                                     fig_mpl = px.bar(xg_leaders_mp.head(8).sort_values('xG'), x='xG', y='Player', orientation='h', template='plotly_dark')
                                     fig_mpl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
                                     st.plotly_chart(fig_mpl, use_container_width=True)
+
+                        if "The Architect (Build-Up Phase)" in modules:
+                            st.subheader("🧭 The Architect (Build-Up Phase)")
+                            build_up = viz_df[(viz_df['Type'] == 1) & (viz_df['x'] < 33)].copy()
+                            if not build_up.empty:
+                                build_up['dist'] = np.sqrt(
+                                    (build_up['endX'] - build_up['x'])**2 + (build_up['endY'] - build_up['y'])**2
+                                )
+                                build_up['Length'] = np.where(build_up['dist'] > 25, 'Long', 'Short')
+                                build_up['TargetThird'] = pd.cut(
+                                    build_up['endX'], bins=[0, 33, 66, 100],
+                                    labels=['Own Third', 'Middle Third', 'Attacking Third'], include_lowest=True
+                                )
+                                build_up['TargetChannel'] = pd.cut(
+                                    build_up['endY'], bins=[0, 33, 67, 100],
+                                    labels=['Left', 'Center', 'Right'], include_lowest=True
+                                )
+                                build_up['Zone'] = build_up['TargetThird'].astype(str) + ' — ' + build_up['TargetChannel'].astype(str)
+                                _short = build_up[build_up['Length'] == 'Short']
+                                _long = build_up[build_up['Length'] == 'Long']
+                                _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                                _mc1.metric("Build-Up Passes", len(build_up))
+                                _mc2.metric("🔵 Short (≤25 u)", len(_short))
+                                _mc3.metric("🟡 Long (>25 u)", len(_long))
+                                _mc4.metric("Players", build_up['Player'].nunique())
+                                fig_arch = _make_plotly_pitch("The Architect — 🔵 Short Pass · 🟡 Long Pass")
+                                # Zone grid dividers
+                                for xv in [33, 66]:
+                                    fig_arch.add_shape(type='line', x0=xv, y0=0, x1=xv, y1=100,
+                                                       line=dict(color='rgba(255,255,255,0.3)', dash='dot', width=1.5))
+                                for yv in [33, 67]:
+                                    fig_arch.add_shape(type='line', x0=0, y0=yv, x1=100, y1=yv,
+                                                       line=dict(color='rgba(255,255,255,0.2)', dash='dot', width=1))
+                                # Third labels along top
+                                for _lbl, _xc in [('Own ⅓', 16.5), ('Middle ⅓', 49.5), ('Att ⅓', 83)]:
+                                    fig_arch.add_annotation(x=_xc, y=97, text=_lbl, showarrow=False,
+                                                            font=dict(color='rgba(255,255,255,0.5)', size=10))
+                                # Channel labels on left edge
+                                for _lbl, _yc in [('Left', 16.5), ('Center', 50), ('Right', 83.5)]:
+                                    fig_arch.add_annotation(x=1, y=_yc, text=_lbl, showarrow=False,
+                                                            font=dict(color='rgba(255,255,255,0.4)', size=9), xanchor='left')
+                                if not _short.empty:
+                                    _add_plotly_action_lines(fig_arch, _short, "🔵 Short Pass", "#00ffff", width=2)
+                                if not _long.empty:
+                                    _add_plotly_action_lines(fig_arch, _long, "🟡 Long Pass", "#ffd700", width=2)
+                                st.plotly_chart(fig_arch, use_container_width=True)
+                                zone_counts = build_up.groupby('Zone').size().reset_index(name='Passes').sort_values('Passes', ascending=False)
+                                with st.expander("📊 Zone Breakdown & Build-Up Leaders"):
+                                    _zc1, _zc2 = st.columns(2)
+                                    with _zc1:
+                                        st.markdown("**Passes by Target Zone**")
+                                        fig_zb = px.bar(zone_counts, x='Passes', y='Zone', orientation='h',
+                                                        template='plotly_dark', color='Passes',
+                                                        color_continuous_scale='Turbo')
+                                        fig_zb.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0),
+                                                             showlegend=False, coloraxis_showscale=False)
+                                        st.plotly_chart(fig_zb, use_container_width=True)
+                                    with _zc2:
+                                        st.markdown("**Top Players (Build-Up Volume)**")
+                                        _build_leaders = build_up.groupby('Player').size().reset_index(name='Build-Up Passes').sort_values('Build-Up Passes', ascending=False)
+                                        fig_bul = px.bar(_build_leaders.head(8).sort_values('Build-Up Passes'),
+                                                         x='Build-Up Passes', y='Player', orientation='h', template='plotly_dark')
+                                        fig_bul.update_layout(height=280, margin=dict(l=0, r=0, t=10, b=0))
+                                        st.plotly_chart(fig_bul, use_container_width=True)
+                            else:
+                                st.info("No build-up pass actions available for current filters.")
+
+                        if "Passing Network (Structure)" in modules:
+                            st.subheader("🧭 Passing Network (Structure)")
+                            st.caption("Node size = event involvement · Edge thickness = pass frequency between two players (min 3 passes)")
+                            net_df = viz_df.copy()
+                            avg_pos = net_df.groupby('Player')[['x', 'y']].mean()
+                            pass_counts = net_df.groupby('Player').size()
+                            net_df['NextPlayer'] = net_df['Player'].shift(-1)
+                            net_df['NextTeam'] = net_df['Team'].shift(-1)
+                            edges = net_df[(net_df['Type'] == 1) & (net_df['Outcome'] == 'Successful') & (net_df['NextTeam'] == sel_team)]
+                            if not edges.empty:
+                                links = edges.groupby(['Player', 'NextPlayer']).size().reset_index(name='count')
+                                links = links[links['count'] > 2]
+                                _mc1, _mc2 = st.columns(2)
+                                _mc1.metric("Players in Network", len(avg_pos))
+                                _mc2.metric("Pass Connections (≥3)", len(links))
+                                fig_l_net = _make_plotly_pitch("Passing Network (Structure)")
+                                max_edge = max(links['count'].max(), 1)
+                                for _, _row in links.iterrows():
+                                    p1, p2, c = _row['Player'], _row['NextPlayer'], _row['count']
+                                    if p1 in avg_pos.index and p2 in avg_pos.index:
+                                        fig_l_net.add_trace(go.Scatter(
+                                            x=[avg_pos.loc[p1].x, avg_pos.loc[p2].x],
+                                            y=[avg_pos.loc[p1].y, avg_pos.loc[p2].y],
+                                            mode='lines',
+                                            line=dict(color='#ff4b4b', width=1 + (4 * c / max_edge)),
+                                            opacity=0.55, hoverinfo='skip', showlegend=False
+                                        ))
+                                node_sizes = np.clip(pass_counts.reindex(avg_pos.index).fillna(0).values * 2, 8, 40)
+                                fig_l_net.add_trace(go.Scatter(
+                                    x=avg_pos['x'], y=avg_pos['y'],
+                                    mode='markers+text',
+                                    marker=dict(size=node_sizes, color='#0e1117', line=dict(color='white', width=2)),
+                                    text=[p.split(' ')[-1] for p in avg_pos.index],
+                                    textposition='middle center', textfont=dict(color='white', size=9),
+                                    customdata=np.column_stack([avg_pos.index.values, pass_counts.reindex(avg_pos.index).fillna(0).astype(int).values]),
+                                    hovertemplate="<b>%{customdata[0]}</b><br>Events: %{customdata[1]}<extra></extra>",
+                                    name='Players'
+                                ))
+                                st.plotly_chart(fig_l_net, use_container_width=True)
+                            else:
+                                st.info("No passing-network values available for current filters.")
 
                         # --- Out of Possession ---
                         if "Defensive Actions Map" in modules:
@@ -1690,72 +1790,6 @@ for mgr_idx, manager in enumerate(managers):
                                 st.info("No goal kicks recorded in this range.")
 
                         st.divider()
-
-                        # --- Classic telemetry maps ---
-                        legacy_pitch_mods = legacy_mods.copy()
-                        if legacy_pitch_mods:
-                            st.markdown("#### 🧭 Classic Telemetry Maps")
-
-                            if "The Architect (Build-Up Phase)" in legacy_pitch_mods:
-                                st.subheader("🧭 The Architect (Build-Up Phase)")
-                                build_up = viz_df[(viz_df['Type'] == 1) & (viz_df['x'] < 33)]
-                                if not build_up.empty:
-                                    _mc1, _mc2 = st.columns(2)
-                                    _mc1.metric("Build-Up Passes", len(build_up))
-                                    _mc2.metric("Players", build_up['Player'].nunique())
-                                    fig_l_build = _make_plotly_pitch("Build-Up Phase — passes originating in own third (x < 33)")
-                                    _add_plotly_action_lines(fig_l_build, build_up, "Build-Up Pass", "#00ffff", width=2)
-                                    st.plotly_chart(fig_l_build, use_container_width=True)
-                                    build_leaders = build_up.groupby('Player').size().reset_index(name='Build-Up Passes').sort_values('Build-Up Passes', ascending=False)
-                                    if not build_leaders.empty:
-                                        with st.expander("👥 Build-Up Leaders"):
-                                            fig_bul = px.bar(build_leaders.head(8).sort_values('Build-Up Passes'), x='Build-Up Passes', y='Player', orientation='h', template='plotly_dark')
-                                            fig_bul.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
-                                            st.plotly_chart(fig_bul, use_container_width=True)
-                                else:
-                                    st.info("No build-up actions available for current filters.")
-
-                            if "Passing Network (Structure)" in legacy_pitch_mods:
-                                st.subheader("🧭 Passing Network (Structure)")
-                                st.caption("Node size = event involvement · Edge thickness = pass frequency between two players (min 3 passes)")
-                                net_df = viz_df.copy()
-                                avg_pos = net_df.groupby('Player')[['x', 'y']].mean()
-                                pass_counts = net_df.groupby('Player').size()
-                                net_df['NextPlayer'] = net_df['Player'].shift(-1)
-                                net_df['NextTeam'] = net_df['Team'].shift(-1)
-                                edges = net_df[(net_df['Type'] == 1) & (net_df['Outcome'] == 'Successful') & (net_df['NextTeam'] == sel_team)]
-                                if not edges.empty:
-                                    links = edges.groupby(['Player', 'NextPlayer']).size().reset_index(name='count')
-                                    links = links[links['count'] > 2]
-                                    fig_l_net = _make_plotly_pitch("Passing Network (Structure)")
-                                    max_edge = max(links['count'].max(), 1)
-                                    for _, row in links.iterrows():
-                                        p1, p2, c = row['Player'], row['NextPlayer'], row['count']
-                                        if p1 in avg_pos.index and p2 in avg_pos.index:
-                                            fig_l_net.add_trace(go.Scatter(
-                                                x=[avg_pos.loc[p1].x, avg_pos.loc[p2].x],
-                                                y=[avg_pos.loc[p1].y, avg_pos.loc[p2].y],
-                                                mode='lines',
-                                                line=dict(color='#ff4b4b', width=1 + (4 * c / max_edge)),
-                                                opacity=0.55,
-                                                hoverinfo='skip',
-                                                showlegend=False
-                                            ))
-                                    node_sizes = np.clip(pass_counts.reindex(avg_pos.index).fillna(0).values * 2, 8, 40)
-                                    fig_l_net.add_trace(go.Scatter(
-                                        x=avg_pos['x'], y=avg_pos['y'],
-                                        mode='markers+text',
-                                        marker=dict(size=node_sizes, color='#0e1117', line=dict(color='white', width=2)),
-                                        text=[p.split(' ')[-1] for p in avg_pos.index],
-                                        textposition='middle center',
-                                        textfont=dict(color='white', size=9),
-                                        customdata=np.column_stack([avg_pos.index.values, pass_counts.reindex(avg_pos.index).fillna(0).astype(int).values]),
-                                        hovertemplate="<b>%{customdata[0]}</b><br>Events: %{customdata[1]}<extra></extra>",
-                                        name='Players'
-                                    ))
-                                    st.plotly_chart(fig_l_net, use_container_width=True)
-                                else:
-                                    st.info("No passing-network values available for current filters.")
 
                     else:
                         st.error(f"Error: {err}")
