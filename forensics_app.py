@@ -2403,8 +2403,8 @@ for mgr_idx, manager in enumerate(managers):
                                         ticktext=['Left Post', 'Centre', 'Right Post'],
                                     ),
                                     yaxis=dict(range=[-0.3, 3.1], showgrid=False, zeroline=False, showticklabels=False),
-                                    height=340, margin=dict(l=10, r=10, t=50, b=80),
-                                    legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='center', x=0.5),
+                                    height=380, margin=dict(l=10, r=10, t=50, b=110),
+                                    legend=dict(orientation='h', yanchor='top', y=-0.30, xanchor='center', x=0.5),
                                     shapes=[
                                         # Left post, right post, crossbar
                                         dict(type='line', x0=_GL, y0=0, x1=_GL, y1=2.44, line=dict(color='white', width=3)),
