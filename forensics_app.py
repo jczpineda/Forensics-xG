@@ -1510,7 +1510,32 @@ for mgr_idx, manager in enumerate(managers):
                                 _mc1.metric("Total xT Conceded", _xtc_total)
                                 _mc2.metric("Threatening Actions", _xtc_n)
                                 _mc3.metric(f"{opp_team} Players Involved", _xtc_ply)
+                                # --- Find sel_team players who conceded each xT action ---
+                                _sel_in_range = match_df[
+                                    (match_df['Team'] == sel_team) &
+                                    (match_df['Minute'] >= min_range[0]) &
+                                    (match_df['Minute'] <= min_range[1])
+                                ].sort_values('Index')
+                                _conc_rows = []
+                                for _, _opp_row in _xtc_acts.iterrows():
+                                    _prev_sel = _sel_in_range[_sel_in_range['Index'] < _opp_row['Index']]
+                                    if not _prev_sel.empty:
+                                        _last_sel = _prev_sel.iloc[-1]
+                                        _conc_rows.append({
+                                            'Player': _last_sel['Player'],
+                                            'x': _last_sel['x'],
+                                            'y': _last_sel['y'],
+                                            'xT_Conceded': _opp_row['xT_Added'],
+                                            'Minute': int(_opp_row['Minute'])
+                                        })
+                                _conc_df = pd.DataFrame(_conc_rows) if _conc_rows else pd.DataFrame()
+
                                 fig_xtc = _make_plotly_pitch("xT Conceded — cell value = xT given away, brighter = higher threat")
+                                fig_xtc.update_layout(
+                                    legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5,
+                                                bgcolor='rgba(14,17,23,0.7)', bordercolor='#444', borderwidth=1),
+                                    margin=dict(l=10, r=10, t=45, b=60),
+                                )
                                 _xbins_c = np.linspace(0, 100, 13)
                                 _ybins_c = np.linspace(0, 100, 9)
                                 _z_c, _xedges_c, _yedges_c = np.histogram2d(
@@ -1540,13 +1565,37 @@ for mgr_idx, manager in enumerate(managers):
                                                 showarrow=False,
                                                 font=dict(color='white', size=9)
                                             )
+                                # Overlay sel_team players' average positions when xT was conceded
+                                if not _conc_df.empty:
+                                    _conc_by_player = _conc_df.groupby('Player')['xT_Conceded'].sum().reset_index()
+                                    _conc_pos = _conc_df.groupby('Player')[['x', 'y']].mean().reset_index()
+                                    _conc_summary = _conc_by_player.merge(_conc_pos, on='Player').sort_values('xT_Conceded', ascending=False)
+                                    _node_sizes_c = np.clip(_conc_summary['xT_Conceded'] * 30, 10, 36)
+                                    fig_xtc.add_trace(go.Scatter(
+                                        x=_conc_summary['x'], y=_conc_summary['y'], mode='markers+text',
+                                        name=f'🔵 {sel_team} (Conceding Position)',
+                                        marker=dict(size=_node_sizes_c, color='#00a3ff', opacity=0.90,
+                                                    symbol='diamond', line=dict(color='white', width=1.5)),
+                                        text=_conc_summary['Player'].str.split(' ').str[-1],
+                                        textposition='top center', textfont=dict(color='#00a3ff', size=9),
+                                        customdata=np.column_stack([_conc_summary['Player'], _conc_summary['xT_Conceded'].round(3)]),
+                                        hovertemplate="<b>%{customdata[0]}</b><br>xT Conceded: %{customdata[1]}<extra></extra>"
+                                    ))
                                 st.plotly_chart(fig_xtc, use_container_width=True)
-                                _xtc_leaders = _xtc_acts.groupby('Player')['xT_Added'].sum().reset_index(name='xT Conceded').sort_values('xT Conceded', ascending=False)
-                                if not _xtc_leaders.empty:
-                                    with st.expander(f"👥 {opp_team} xT Leaders (Threat Generators)"):
-                                        fig_xtcl = px.bar(_xtc_leaders.head(8).sort_values('xT Conceded'), x='xT Conceded', y='Player', orientation='h', template='plotly_dark', color_discrete_sequence=['#ff4b4b'])
-                                        fig_xtcl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
-                                        st.plotly_chart(fig_xtcl, use_container_width=True)
+                                _exp_c1, _exp_c2 = st.columns(2)
+                                _xtc_leaders = _xtc_acts.groupby('Player')['xT_Added'].sum().reset_index(name='xT Generated').sort_values('xT Generated', ascending=False)
+                                with _exp_c1:
+                                    if not _xtc_leaders.empty:
+                                        with st.expander(f"👥 {opp_team} — Threat Generators"):
+                                            fig_xtcl = px.bar(_xtc_leaders.head(8).sort_values('xT Generated'), x='xT Generated', y='Player', orientation='h', template='plotly_dark', color_discrete_sequence=['#ff4b4b'])
+                                            fig_xtcl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                            st.plotly_chart(fig_xtcl, use_container_width=True)
+                                with _exp_c2:
+                                    if not _conc_df.empty:
+                                        with st.expander(f"👥 {sel_team} — xT Conceded by Player"):
+                                            fig_conc = px.bar(_conc_summary.head(8).sort_values('xT_Conceded'), x='xT_Conceded', y='Player', orientation='h', template='plotly_dark', color_discrete_sequence=['#00a3ff'])
+                                            fig_conc.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0), xaxis_title='xT Conceded')
+                                            st.plotly_chart(fig_conc, use_container_width=True)
                             else:
                                 st.info("No xT conceded data available for current filters.")
 
