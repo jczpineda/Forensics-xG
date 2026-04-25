@@ -1286,12 +1286,63 @@ for mgr_idx, manager in enumerate(managers):
                                         hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>Outcome: %{customdata[2]}<extra></extra>"
                                     ))
                                 st.plotly_chart(fig_dm, use_container_width=True)
-                                def_leaders = def_map.groupby('Player').size().reset_index(name='Defensive Actions').sort_values('Defensive Actions', ascending=False)
-                                if not def_leaders.empty:
-                                    with st.expander("👥 Defensive Leaders"):
-                                        fig_dl = px.bar(def_leaders.head(8).sort_values('Defensive Actions'), x='Defensive Actions', y='Player', orientation='h', template='plotly_dark')
-                                        fig_dl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
-                                        st.plotly_chart(fig_dl, use_container_width=True)
+                                # --- Per-player defensive breakdown ---
+                                _succ = def_map[def_map['Outcome'] == 'Successful']
+                                _total_succ = len(_succ)
+                                _total_acts = len(def_map)
+                                _succ_rate = round(_total_succ / _total_acts * 100, 1) if _total_acts > 0 else 0
+                                _tkl_won = len(def_map[(def_map['Action'] == 'Tackle') & (def_map['Outcome'] == 'Successful')])
+                                _mc5, _mc6 = st.columns(2)
+                                _mc5.metric("✅ Success Rate", f"{_succ_rate}%")
+                                _mc6.metric("🔵 Tackles Won", _tkl_won)
+                                with st.expander("👥 Player Defensive Breakdown"):
+                                    # Build per-player pivot: action counts + success rate
+                                    _pvt = def_map.groupby(['Player', 'Action']).size().unstack(fill_value=0).reset_index()
+                                    for _col in ['Tackle', 'Interception', 'Clearance', 'Foul']:
+                                        if _col not in _pvt.columns:
+                                            _pvt[_col] = 0
+                                    _pvt['Total'] = _pvt[['Tackle', 'Interception', 'Clearance', 'Foul']].sum(axis=1)
+                                    _succ_by_player = def_map[def_map['Outcome'] == 'Successful'].groupby('Player').size().reset_index(name='Successful')
+                                    _tkl_won_by_player = def_map[(def_map['Action'] == 'Tackle') & (def_map['Outcome'] == 'Successful')].groupby('Player').size().reset_index(name='Tackles Won')
+                                    _pvt = _pvt.merge(_succ_by_player, on='Player', how='left').fillna(0)
+                                    _pvt = _pvt.merge(_tkl_won_by_player, on='Player', how='left').fillna(0)
+                                    _pvt['Success Rate %'] = (_pvt['Successful'] / _pvt['Total'] * 100).round(1)
+                                    _pvt = _pvt.sort_values('Total', ascending=False)
+                                    # Grouped bar chart
+                                    _bar_data = []
+                                    for _act, _col in [('Tackle', '#00a3ff'), ('Interception', '#ff9900'), ('Clearance', '#d1d5db'), ('Foul', '#ff4b4b')]:
+                                        if _act in _pvt.columns:
+                                            _bar_data.append(go.Bar(
+                                                name=_act, y=_pvt['Player'], x=_pvt[_act],
+                                                orientation='h', marker_color=_col
+                                            ))
+                                    fig_def_break = go.Figure(data=_bar_data)
+                                    fig_def_break.update_layout(
+                                        barmode='stack', template='plotly_dark',
+                                        title='Defensive Actions by Player',
+                                        xaxis_title='Count', yaxis_title='',
+                                        height=max(260, len(_pvt) * 32),
+                                        margin=dict(l=0, r=0, t=40, b=0),
+                                        legend=dict(orientation='h', yanchor='bottom', y=1.01, xanchor='center', x=0.5)
+                                    )
+                                    st.plotly_chart(fig_def_break, use_container_width=True)
+                                    # Success rate bar
+                                    fig_sr = px.bar(
+                                        _pvt.sort_values('Success Rate %'), x='Success Rate %', y='Player',
+                                        orientation='h', template='plotly_dark',
+                                        title='Defensive Success Rate by Player (%)',
+                                        color='Success Rate %', color_continuous_scale='RdYlGn',
+                                        range_color=[0, 100]
+                                    )
+                                    fig_sr.update_layout(height=max(240, len(_pvt) * 32), margin=dict(l=0, r=0, t=40, b=0), coloraxis_showscale=False)
+                                    st.plotly_chart(fig_sr, use_container_width=True)
+                                    # Summary table
+                                    _display_cols = ['Player', 'Tackle', 'Tackles Won', 'Interception', 'Clearance', 'Foul', 'Total', 'Success Rate %']
+                                    _display_cols = [c for c in _display_cols if c in _pvt.columns]
+                                    st.dataframe(
+                                        _pvt[_display_cols].rename(columns={'Tackle': 'Tackles', 'Interception': 'Interceptions', 'Clearance': 'Clearances'}).reset_index(drop=True),
+                                        use_container_width=True, hide_index=True
+                                    )
                             else:
                                 st.info("No defensive actions recorded in this range.")
 
