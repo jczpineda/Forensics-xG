@@ -437,16 +437,17 @@ def _load_all_manager_data(manager_key):
             (utd_events['Type'].isin([8, 12]))
         ]
         avg_def_line = round(recoveries['x'].mean(), 1) if not recoveries.empty else 0
-        team_match_stats.append({
-            'Match': match_label, 'Possession': possession, 'xG': match_xg,
-            'xGA': round(match_xga, 2),
-            'Field Tilt': field_tilt, 'PPDA': ppda, 'Def Line': avg_def_line
-        })
 
         # Per-player xGA (opponent xG in this match)
         opp_shots = opp_events[opp_events['Type'].isin([13, 14, 15, 16])]
         match_xga = float(opp_shots['xG'].sum())
         match_xpts = _poisson_xpts(match_xg, match_xga)
+
+        team_match_stats.append({
+            'Match': match_label, 'Possession': possession, 'xG': match_xg,
+            'xGA': round(match_xga, 2),
+            'Field Tilt': field_tilt, 'PPDA': ppda, 'Def Line': avg_def_line
+        })
 
         # Actual goals: Type 16 = goal; Own Goals (Outcome == 'Own Goal') count for opponent
         utd_goals_scored = len(full_df[
