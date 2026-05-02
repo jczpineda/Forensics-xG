@@ -2783,9 +2783,12 @@ for mgr_idx, manager in enumerate(managers):
                         'Clear/Match': round(clearances / mp, 2),
                         'Fouls/Match': round(fouls / mp, 2),
                         'xT/Match': round(xt / mp, 3),
-                        'xGA/Match': round(_p_xga_info.get('xGA', 0.0) / mp, 3) if mp > 0 else 0.0,
-                        'xTC/Match': round(_p_xtc_total / mp, 3) if mp > 0 else 0.0,
                     })
+                    # Store xGA/xTC separately for dedicated charts
+                    _p_xga_pm = round(_p_xga_info.get('xGA', 0.0) / mp, 3) if mp > 0 else 0.0
+                    _p_xtc_pm = round(_p_xtc_total / mp, 3) if mp > 0 else 0.0
+                    stats_rows[-1]['_xGA/Match'] = _p_xga_pm
+                    stats_rows[-1]['_xTC/Match'] = _p_xtc_pm
                 stats_summary = pd.DataFrame(stats_rows).sort_values('xT/Match', ascending=False)
 
                 # --- Player Selector ---
@@ -2918,8 +2921,46 @@ for mgr_idx, manager in enumerate(managers):
                     st.plotly_chart(fig_xt_bar, use_container_width=True)
 
                     st.divider()
+
+                    # --- xGA per Match & xT Conceded per Match charts ---
+                    st.subheader("🛡️ Defensive Exposure per Match")
+                    _def_chart_df = stats_summary[['Player', '_xGA/Match', '_xTC/Match']].copy()
+                    _def_chart_df = _def_chart_df[_def_chart_df['Player'] != 'Unknown']
+
+                    _dc1, _dc2 = st.columns(2)
+                    with _dc1:
+                        _xga_df = _def_chart_df.sort_values('_xGA/Match', ascending=True)
+                        fig_xga = px.bar(
+                            _xga_df, x='_xGA/Match', y='Player', orientation='h',
+                            title='xGA per Match (Opponent xG while player was in squad)',
+                            template='plotly_dark',
+                            color='_xGA/Match',
+                            color_continuous_scale=['#00ff85', '#ff4b4b'],
+                            labels={'_xGA/Match': 'xGA/Match'}
+                        )
+                        fig_xga.update_layout(paper_bgcolor='#0e1117', plot_bgcolor='#0e1117',
+                                              height=max(400, len(_def_chart_df) * 28),
+                                              coloraxis_showscale=False)
+                        st.plotly_chart(fig_xga, use_container_width=True)
+                    with _dc2:
+                        _xtc_df = _def_chart_df.sort_values('_xTC/Match', ascending=True)
+                        fig_xtc_bar = px.bar(
+                            _xtc_df, x='_xTC/Match', y='Player', orientation='h',
+                            title='xT Conceded per Match (Threat generated against player)',
+                            template='plotly_dark',
+                            color='_xTC/Match',
+                            color_continuous_scale=['#00ff85', '#ff4b4b'],
+                            labels={'_xTC/Match': 'xTC/Match'}
+                        )
+                        fig_xtc_bar.update_layout(paper_bgcolor='#0e1117', plot_bgcolor='#0e1117',
+                                                   height=max(400, len(_def_chart_df) * 28),
+                                                   coloraxis_showscale=False)
+                        st.plotly_chart(fig_xtc_bar, use_container_width=True)
+
+                    st.divider()
                     st.subheader(f"📊 Average Player Statistics ({n_matches} Matches)")
-                    st.dataframe(stats_summary, use_container_width=True, hide_index=True)
+                    _display_summary = stats_summary.drop(columns=['_xGA/Match', '_xTC/Match'], errors='ignore')
+                    st.dataframe(_display_summary, use_container_width=True, hide_index=True)
             else:
                 st.error(f"Failed to load {mgr_short} match data.")
 
