@@ -2746,8 +2746,7 @@ for mgr_idx, manager in enumerate(managers):
                 n_matches = utd_df['Match'].nunique()
                 players = sorted([p for p in utd_df['Player'].unique() if p != 'Unknown'])
 
-                # --- Player Stats Summary ---
-                st.subheader(f"📊 Average Player Statistics ({n_matches} Matches)")
+                # --- Player Stats Summary (computed here, displayed at bottom) ---
                 stats_rows = []
                 for player in players:
                     pdf = utd_df[utd_df['Player'] == player]
@@ -2788,8 +2787,6 @@ for mgr_idx, manager in enumerate(managers):
                         'xTC/Match': round(_p_xtc_total / mp, 3) if mp > 0 else 0.0,
                     })
                 stats_summary = pd.DataFrame(stats_rows).sort_values('xT/Match', ascending=False)
-                st.dataframe(stats_summary, use_container_width=True, hide_index=True)
-                st.divider()
 
                 # --- Player Selector ---
                 sel_p = st.selectbox("Select Player for Visualizations", players, key=f"player_sel_{manager}")
@@ -2921,30 +2918,8 @@ for mgr_idx, manager in enumerate(managers):
                     st.plotly_chart(fig_xt_bar, use_container_width=True)
 
                     st.divider()
-                    st.subheader("⬇️ Download Player Stats")
-                    _dl_df = stats_summary.reset_index(drop=True)
-                    _dl_c1, _dl_c2 = st.columns(2)
-                    with _dl_c1:
-                        st.download_button(
-                            label="📥 Download CSV",
-                            data=_dl_df.to_csv(index=False).encode('utf-8'),
-                            file_name=f"avg_player_stats_{mgr_short.lower()}.csv",
-                            mime='text/csv',
-                            use_container_width=True,
-                        )
-                    with _dl_c2:
-                        import io as _io
-                        _xlsx_buf = _io.BytesIO()
-                        with pd.ExcelWriter(_xlsx_buf, engine='openpyxl') as _writer:
-                            _dl_df.to_excel(_writer, index=False, sheet_name='Player Stats')
-                        _xlsx_buf.seek(0)
-                        st.download_button(
-                            label="📥 Download Excel",
-                            data=_xlsx_buf.getvalue(),
-                            file_name=f"avg_player_stats_{mgr_short.lower()}.xlsx",
-                            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                            use_container_width=True,
-                        )
+                    st.subheader(f"📊 Average Player Statistics ({n_matches} Matches)")
+                    st.dataframe(stats_summary, use_container_width=True, hide_index=True)
             else:
                 st.error(f"Failed to load {mgr_short} match data.")
 
