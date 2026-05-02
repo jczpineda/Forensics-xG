@@ -439,6 +439,7 @@ def _load_all_manager_data(manager_key):
         avg_def_line = round(recoveries['x'].mean(), 1) if not recoveries.empty else 0
         team_match_stats.append({
             'Match': match_label, 'Possession': possession, 'xG': match_xg,
+            'xGA': round(match_xga, 2),
             'Field Tilt': field_tilt, 'PPDA': ppda, 'Def Line': avg_def_line
         })
 
@@ -895,18 +896,20 @@ for mgr_idx, manager in enumerate(managers):
 
                         # Expected Goals
                         team_xg = round(plot_df.loc[plot_df['Type'].isin([13, 14, 15, 16]) & (plot_df['Outcome'] != 'Own Goal'), 'xG'].sum(), 2)
+                        opp_xga = round(opp_stats.loc[opp_stats['Type'].isin([13, 14, 15, 16]), 'xG'].sum(), 2)
 
                         st.divider()
-                        m1, m2, m3, m4, m5, m6, m7, m8, m9 = st.columns(9)
+                        m1, m2, m3, m4, m5, m6, m7, m8, m9, m10 = st.columns(10)
                         m1.metric("⚽ Passing", f"{succ_passes}/{total_passes}", f"{pass_acc}%")
                         m2.metric("🎯 Shooting", f"{goals} Goals", f"{total_shots} Shots" + (f" · {own_goals} Own Goal{'s' if own_goals > 1 else ''}" if own_goals else ""))
                         m3.metric("📊 Possession", f"{possession}%", "Pass-Based")
                         m4.metric("📈 xG", f"{team_xg}", f"{goals} Actual Goals")
-                        m5.metric("🛡️ Def. Actions", f"{total_def}", f"{tackles} Tackles")
-                        m6.metric("⚠️ Discipline", f"{fouls} Fouls", "Committed")
-                        m7.metric("⚖️ Field Tilt", f"{field_tilt}%", "Final 3rd Share")
-                        m8.metric("🛑 PPDA", f"{ppda}", "Passes per Def. Action")
-                        m9.metric("📏 Def. Line", f"{avg_rec_height}m", "Avg Recovery Height")
+                        m5.metric("🚨 xGA", f"{opp_xga}", "Opp. Expected Goals")
+                        m6.metric("🛡️ Def. Actions", f"{total_def}", f"{tackles} Tackles")
+                        m7.metric("⚠️ Discipline", f"{fouls} Fouls", "Committed")
+                        m8.metric("⚖️ Field Tilt", f"{field_tilt}%", "Final 3rd Share")
+                        m9.metric("🛑 PPDA", f"{ppda}", "Passes per Def. Action")
+                        m10.metric("📏 Def. Line", f"{avg_rec_height}m", "Avg Recovery Height")
                         st.divider()
 
                         # --- Team progression insights ---
@@ -3103,17 +3106,19 @@ for mgr_idx, manager in enumerate(managers):
                 # --- Summary Metrics ---
                 avg_poss = round(ts_df['Possession'].mean(), 1)
                 avg_xg = round(ts_df['xG'].mean(), 2)
+                avg_xga = round(ts_df['xGA'].mean(), 2)
                 avg_tilt = round(ts_df['Field Tilt'].mean(), 1)
                 avg_ppda = round(ts_df['PPDA'].mean(), 1)
                 avg_def = round(ts_df['Def Line'].mean(), 1)
 
                 st.subheader(f"📊 Averages Across {n_matches_t} Matches")
-                mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+                mc1, mc2, mc3, mc4, mc5, mc6 = st.columns(6)
                 mc1.metric("📊 Possession", f"{avg_poss}%")
                 mc2.metric("📈 xG", f"{avg_xg}")
-                mc3.metric("⚖️ Field Tilt", f"{avg_tilt}%")
-                mc4.metric("🛑 PPDA", f"{avg_ppda}")
-                mc5.metric("📏 Def. Line", f"{avg_def}m")
+                mc3.metric("🚨 xGA", f"{avg_xga}")
+                mc4.metric("⚖️ Field Tilt", f"{avg_tilt}%")
+                mc5.metric("🛑 PPDA", f"{avg_ppda}")
+                mc6.metric("📏 Def. Line", f"{avg_def}m")
                 st.divider()
 
                 st.divider()
