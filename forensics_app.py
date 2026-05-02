@@ -393,8 +393,11 @@ def _load_all_manager_data(manager_key):
             sp_taker = sp_evt['Player']
             if sp_taker != scorer:
                 sp_assists[sp_taker] = sp_assists.get(sp_taker, 0) + 1
-    # Compute per-match team stats for the Average Team Stats tab
+    # Compute per-match team stats AND per-player defensive stats
     team_match_stats = []
+    player_xga = {}   # player -> {'xGA': float, 'matches': int}
+    player_xtc = {}   # player -> total xT conceded
+    opp_xt_parts = []  # for team-level xT conceded grid
     utd_team_name = 'Manchester United'
     for match_label, full_df in full_dfs.items():
         utd_events = full_df[(full_df['Team'] == utd_team_name) & (full_df['Player'] != 'Unknown')]
@@ -420,7 +423,38 @@ def _load_all_manager_data(manager_key):
             'Field Tilt': field_tilt, 'PPDA': ppda, 'Def Line': avg_def_line
         })
 
-    return combined, sp_goals, sp_assists, team_match_stats
+        # Per-player xGA (opponent xG in this match)
+        opp_shots = opp_events[opp_events['Type'].isin([13, 14, 15, 16])]
+        match_xga = float(opp_shots['xG'].sum())
+        for p in utd_events['Player'].unique():
+            if p not in player_xga:
+                player_xga[p] = {'xGA': 0.0, 'matches': 0}
+            player_xga[p]['xGA'] += match_xga
+            player_xga[p]['matches'] += 1
+
+        # Per-player xT conceded (opponent xT attributed to last MU player before each action)
+        mu_sorted = utd_events.sort_values('Index')
+        opp_xt_acts = opp_events[
+            (opp_events['Type'].isin([1, 3])) &
+            (opp_events['Outcome'] == 'Successful') &
+            (opp_events['xT_Added'] > 0)
+        ].sort_values('Index')
+        for _, opp_row in opp_xt_acts.iterrows():
+            prev_mu = mu_sorted[mu_sorted['Index'] < opp_row['Index']]
+            if not prev_mu.empty:
+                last_player = prev_mu.iloc[-1]['Player']
+                player_xtc[last_player] = player_xtc.get(last_player, 0.0) + float(opp_row['xT_Added'])
+
+        # Opponent xT data (coordinate-flipped) for the team-level xT conceded grid
+        if not opp_xt_acts.empty:
+            _flipped = opp_xt_acts[['x', 'y', 'xT_Added']].copy()
+            _flipped['x'] = 100 - _flipped['x']
+            _flipped['y'] = 100 - _flipped['y']
+            opp_xt_parts.append(_flipped)
+
+    opp_xt_df = pd.concat(opp_xt_parts, ignore_index=True) if opp_xt_parts else pd.DataFrame()
+    opp_data = {'player_xga': player_xga, 'player_xtc': player_xtc, 'opp_xt_df': opp_xt_df}
+    return combined, sp_goals, sp_assists, team_match_stats, opp_data
 
 
 # --- 5. HELPER: Zonal Grid Renderer ---
@@ -846,6 +880,7 @@ for mgr_idx, manager in enumerate(managers):
                         attacking_phase_options = [
                             "Actions Leading to Shots",
                             "Zone 14 & Half-Spaces", "Zone Invasions",
+                            "Crosses Map",
                             "Average Attacking & Defending Positions"
                         ]
                         att_trans_options = [
@@ -2056,6 +2091,92 @@ for mgr_idx, manager in enumerate(managers):
                                             use_container_width=True, hide_index=True
                                         )
 
+                        if "Crosses Map" in modules:
+                            st.subheader("⚔️ Crosses Map")
+                            cross_df = viz_df[(viz_df['Type'] == 1) & (viz_df['isCross'] == True)].copy()
+                            if not cross_df.empty:
+                                # Determine if each cross led to a goal within the next ~8 events
+                                goal_events = match_df[
+                                    (match_df['Team'] == sel_team) & (match_df['Type'] == 16)
+                                ].sort_values('Index')
+                                def _cross_led_to_goal(cross_idx):
+                                    nxt = goal_events[
+                                        (goal_events['Index'] > cross_idx) &
+                                        (goal_events['Index'] <= cross_idx + 8)
+                                    ]
+                                    return not nxt.empty
+                                cross_df['led_to_goal'] = cross_df['Index'].apply(_cross_led_to_goal)
+
+                                total_crosses = len(cross_df)
+                                goal_crosses = int(cross_df['led_to_goal'].sum())
+                                succ_crosses = len(cross_df[cross_df['Outcome'] == 'Successful'])
+                                _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                                _mc1.metric("Total Crosses", total_crosses)
+                                _mc2.metric("Successful Crosses", succ_crosses)
+                                _mc3.metric("Crosses → Goal", goal_crosses)
+                                _mc4.metric("Players Crossing", cross_df['Player'].nunique())
+
+                                _cr_filter = st.multiselect(
+                                    "🔍 Show on map:",
+                                    ["Successful ✅", "Unsuccessful ❌", "Led to Goal ⭐"],
+                                    default=["Successful ✅", "Unsuccessful ❌", "Led to Goal ⭐"],
+                                    key=f"cr_filter_{manager}"
+                                )
+
+                                fig_cr = _make_plotly_pitch("Crosses Map — 🟢 Successful · 🔴 Unsuccessful · ⭐ Led to Goal")
+                                fig_cr.update_layout(
+                                    legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5,
+                                                bgcolor='rgba(14,17,23,0.7)', bordercolor='#444', borderwidth=1),
+                                    margin=dict(l=10, r=10, t=45, b=60),
+                                )
+
+                                _cr_succ = cross_df[cross_df['Outcome'] == 'Successful']
+                                _cr_fail = cross_df[cross_df['Outcome'] != 'Successful']
+                                _cr_goal = cross_df[cross_df['led_to_goal']]
+
+                                if "Successful ✅" in _cr_filter and not _cr_succ.empty:
+                                    _add_plotly_action_lines(fig_cr, _cr_succ, "✅ Successful Cross", "#00ff85", width=2, arrows=True)
+                                if "Unsuccessful ❌" in _cr_filter and not _cr_fail.empty:
+                                    _add_plotly_action_lines(fig_cr, _cr_fail, "❌ Unsuccessful Cross", "#ff4b4b", width=2, dash='dot', arrows=True)
+                                if "Led to Goal ⭐" in _cr_filter and not _cr_goal.empty:
+                                    _cr_goal_custom = np.column_stack([
+                                        _cr_goal['Player'].astype(str),
+                                        _cr_goal['Minute'].astype(int),
+                                    ])
+                                    fig_cr.add_trace(go.Scatter(
+                                        x=_cr_goal['endX'], y=_cr_goal['endY'], mode='markers',
+                                        marker=dict(color='#ffd700', size=16, symbol='star',
+                                                    line=dict(color='white', width=1.5)),
+                                        name='⭐ Led to Goal',
+                                        customdata=_cr_goal_custom,
+                                        hovertemplate="<b>%{customdata[0]}</b><br>Minute: %{customdata[1]}'<br>Cross → Goal<extra></extra>"
+                                    ))
+                                st.plotly_chart(fig_cr, use_container_width=True)
+
+                                _cross_leaders = cross_df.groupby('Player').agg(
+                                    Crosses=('Index', 'count'),
+                                    Successful=('Outcome', lambda x: (x == 'Successful').sum()),
+                                    Goals=('led_to_goal', 'sum')
+                                ).reset_index().sort_values('Crosses', ascending=False)
+                                if not _cross_leaders.empty:
+                                    with st.expander("👥 Cross Leaders"):
+                                        _cl1, _cl2 = st.columns(2)
+                                        with _cl1:
+                                            fig_crl = px.bar(
+                                                _cross_leaders.head(8).sort_values('Crosses'),
+                                                x='Crosses', y='Player', orientation='h',
+                                                template='plotly_dark', color_discrete_sequence=['#00ff85']
+                                            )
+                                            fig_crl.update_layout(height=260, margin=dict(l=0, r=0, t=20, b=0))
+                                            st.plotly_chart(fig_crl, use_container_width=True)
+                                        with _cl2:
+                                            st.dataframe(
+                                                _cross_leaders.reset_index(drop=True),
+                                                use_container_width=True, hide_index=True
+                                            )
+                            else:
+                                st.info("No crosses recorded in this time range.")
+
                         # --- Attacking Transition ---
                         if "Time-to-Shot Scatter Plot" in modules:
                             st.subheader("⚡ Time-to-Shot Scatter Plot")
@@ -2619,7 +2740,7 @@ for mgr_idx, manager in enumerate(managers):
             mgr_short = manager.split()[-1].title()  # Amorim / Fletcher / Carrick
             st.header(f"👥 Average Player Stats")
             with st.spinner(f"Loading all {mgr_short}-era match data..."):
-                utd_df, sp_goals_map, sp_assists_map, team_match_stats = _load_all_manager_data(manager)
+                utd_df, sp_goals_map, sp_assists_map, team_match_stats, player_def_stats = _load_all_manager_data(manager)
 
             if not utd_df.empty:
                 n_matches = utd_df['Match'].nunique()
@@ -2644,6 +2765,8 @@ for mgr_idx, manager in enumerate(managers):
                     clearances = len(pdf[pdf['Type'] == 12])
                     fouls = len(pdf[pdf['Type'] == 4])
                     xt = pdf['xT_Added'].sum()
+                    _p_xga_info = player_def_stats.get('player_xga', {}).get(player, {})
+                    _p_xtc_total = player_def_stats.get('player_xtc', {}).get(player, 0.0)
                     stats_rows.append({
                         'Player': player,
                         'Matches': mp,
@@ -2661,6 +2784,8 @@ for mgr_idx, manager in enumerate(managers):
                         'Clear/Match': round(clearances / mp, 2),
                         'Fouls/Match': round(fouls / mp, 2),
                         'xT/Match': round(xt / mp, 3),
+                        'xGA/Match': round(_p_xga_info.get('xGA', 0.0) / mp, 3) if mp > 0 else 0.0,
+                        'xTC/Match': round(_p_xtc_total / mp, 3) if mp > 0 else 0.0,
                     })
                 stats_summary = pd.DataFrame(stats_rows).sort_values('xT/Match', ascending=False)
                 st.dataframe(stats_summary, use_container_width=True, hide_index=True)
@@ -2794,6 +2919,32 @@ for mgr_idx, manager in enumerate(managers):
                     )
                     fig_xt_bar.update_layout(paper_bgcolor='#0e1117', plot_bgcolor='#0e1117', height=600)
                     st.plotly_chart(fig_xt_bar, use_container_width=True)
+
+                    st.divider()
+                    st.subheader("⬇️ Download Player Stats")
+                    _dl_df = stats_summary.reset_index(drop=True)
+                    _dl_c1, _dl_c2 = st.columns(2)
+                    with _dl_c1:
+                        st.download_button(
+                            label="📥 Download CSV",
+                            data=_dl_df.to_csv(index=False).encode('utf-8'),
+                            file_name=f"avg_player_stats_{mgr_short.lower()}.csv",
+                            mime='text/csv',
+                            use_container_width=True,
+                        )
+                    with _dl_c2:
+                        import io as _io
+                        _xlsx_buf = _io.BytesIO()
+                        with pd.ExcelWriter(_xlsx_buf, engine='openpyxl') as _writer:
+                            _dl_df.to_excel(_writer, index=False, sheet_name='Player Stats')
+                        _xlsx_buf.seek(0)
+                        st.download_button(
+                            label="📥 Download Excel",
+                            data=_xlsx_buf.getvalue(),
+                            file_name=f"avg_player_stats_{mgr_short.lower()}.xlsx",
+                            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            use_container_width=True,
+                        )
             else:
                 st.error(f"Failed to load {mgr_short} match data.")
 
@@ -2802,7 +2953,7 @@ for mgr_idx, manager in enumerate(managers):
             mgr_short_t = manager.split()[-1].title()
             st.header(f"📈 Average Team Stats — {mgr_short_t} Era")
             with st.spinner(f"Loading all {mgr_short_t}-era match data..."):
-                utd_df_t, _, _, team_stats_t = _load_all_manager_data(manager)
+                utd_df_t, _, _, team_stats_t, opp_data_t = _load_all_manager_data(manager)
 
             if team_stats_t:
                 ts_df = pd.DataFrame(team_stats_t)
@@ -2980,5 +3131,42 @@ for mgr_idx, manager in enumerate(managers):
                         ax_xtg.set_title(f'Expected Threat Grid — {n_matches_t} Matches', color='white', fontsize=12)
                         st.pyplot(fig_xtg)
                         plt.close(fig_xtg)
+
+                    st.divider()
+
+                    # --- Average xT Conceded Grid ---
+                    st.subheader("🛡️ Average xT Conceded Grid")
+                    opp_xt_df_t = opp_data_t.get('opp_xt_df', pd.DataFrame())
+                    fig_xtcg, ax_xtcg = plt.subplots(figsize=(10, 7))
+                    fig_xtcg.set_facecolor('#0e1117')
+                    ax_xtcg.set_facecolor('#0e1117')
+                    pitch_xtcg = Pitch(pitch_type='opta', pitch_color='#0e1117', line_color='white')
+                    pitch_xtcg.draw(ax=ax_xtcg)
+                    if not opp_xt_df_t.empty:
+                        bin_stat_c = pitch_xtcg.bin_statistic(
+                            opp_xt_df_t['x'].values, opp_xt_df_t['y'].values,
+                            values=opp_xt_df_t['xT_Added'].values,
+                            statistic='sum', bins=(12, 8)
+                        )
+                        pitch_xtcg.heatmap(bin_stat_c, ax=ax_xtcg, cmap='inferno', alpha=0.7,
+                                            edgecolors='#262730', lw=1, zorder=0)
+                        stat_c = bin_stat_c['statistic']
+                        cx_c = bin_stat_c['cx']
+                        cy_c = bin_stat_c['cy']
+                        for _ri in range(stat_c.shape[0]):
+                            for _ci in range(stat_c.shape[1]):
+                                val_c = stat_c[_ri, _ci]
+                                if val_c > 0.001:
+                                    ax_xtcg.text(
+                                        cx_c[_ri, _ci], cy_c[_ri, _ci], f'{val_c:.3f}',
+                                        color='white', ha='center', va='center',
+                                        fontsize=9, fontweight='bold', zorder=1
+                                    )
+                    else:
+                        pitch_xtcg.annotate("No xT conceded data available", xy=(50, 50),
+                                             c='white', ha='center', va='center', size=15, ax=ax_xtcg)
+                    ax_xtcg.set_title(f'Average xT Conceded Grid — {n_matches_t} Matches', color='white', fontsize=12)
+                    st.pyplot(fig_xtcg)
+                    plt.close(fig_xtcg)
             else:
                 st.error(f"Failed to load {mgr_short_t} match data.")
