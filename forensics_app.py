@@ -398,6 +398,9 @@ def _load_all_manager_data(manager_key):
     player_xga = {}   # player -> {'xGA': float, 'matches': int}
     player_xtc = {}   # player -> total xT conceded
     player_xpts = {}  # player -> total xPts
+    player_apts = {}  # player -> total actual points
+    player_gf   = {}  # player -> total actual goals scored
+    player_ga   = {}  # player -> total actual goals conceded
     opp_xt_parts = []  # for team-level xT conceded grid
     utd_team_name = 'Manchester United'
 
@@ -443,12 +446,42 @@ def _load_all_manager_data(manager_key):
         opp_shots = opp_events[opp_events['Type'].isin([13, 14, 15, 16])]
         match_xga = float(opp_shots['xG'].sum())
         match_xpts = _poisson_xpts(match_xg, match_xga)
+
+        # Actual goals: Type 16 = goal; Own Goals (Outcome == 'Own Goal') count for opponent
+        utd_goals_scored = len(full_df[
+            (full_df['Type'] == 16) &
+            (full_df['Team'] == utd_team_name) &
+            (full_df['Outcome'] != 'Own Goal')
+        ]) + len(full_df[
+            (full_df['Type'] == 16) &
+            (full_df['Team'] != utd_team_name) &
+            (full_df['Outcome'] == 'Own Goal')
+        ])
+        utd_goals_conceded = len(full_df[
+            (full_df['Type'] == 16) &
+            (full_df['Team'] != utd_team_name) &
+            (full_df['Outcome'] != 'Own Goal')
+        ]) + len(full_df[
+            (full_df['Type'] == 16) &
+            (full_df['Team'] == utd_team_name) &
+            (full_df['Outcome'] == 'Own Goal')
+        ])
+        if utd_goals_scored > utd_goals_conceded:
+            match_apts = 3
+        elif utd_goals_scored == utd_goals_conceded:
+            match_apts = 1
+        else:
+            match_apts = 0
+
         for p in utd_events['Player'].unique():
             if p not in player_xga:
                 player_xga[p] = {'xGA': 0.0, 'matches': 0}
             player_xga[p]['xGA'] += match_xga
             player_xga[p]['matches'] += 1
             player_xpts[p] = player_xpts.get(p, 0.0) + match_xpts
+            player_apts[p] = player_apts.get(p, 0) + match_apts
+            player_gf[p]   = player_gf.get(p, 0) + utd_goals_scored
+            player_ga[p]   = player_ga.get(p, 0) + utd_goals_conceded
 
         # Per-player xT conceded (opponent xT attributed to last MU player before each action)
         mu_sorted = utd_events.sort_values('Index')
@@ -472,7 +505,9 @@ def _load_all_manager_data(manager_key):
 
     opp_xt_df = pd.concat(opp_xt_parts, ignore_index=True) if opp_xt_parts else pd.DataFrame()
     opp_data = {'player_xga': player_xga, 'player_xtc': player_xtc,
-                'player_xpts': player_xpts, 'opp_xt_df': opp_xt_df}
+                'player_xpts': player_xpts, 'player_apts': player_apts,
+                'player_gf': player_gf, 'player_ga': player_ga,
+                'opp_xt_df': opp_xt_df}
     return combined, sp_goals, sp_assists, team_match_stats, opp_data
 
 
@@ -2803,14 +2838,21 @@ for mgr_idx, manager in enumerate(managers):
                         'Fouls/Match': round(fouls / mp, 2),
                         'xT/Match': round(xt / mp, 3),
                     })
-                    # Store xGA/xTC/xPts separately for dedicated charts
+                    # Store xGA/xTC/xPts/aPts separately for dedicated charts
                     _p_xga_pm = round(_p_xga_info.get('xGA', 0.0) / mp, 3) if mp > 0 else 0.0
                     _p_xtc_pm = round(_p_xtc_total / mp, 3) if mp > 0 else 0.0
                     _p_xpts_total = player_def_stats.get('player_xpts', {}).get(player, 0.0)
                     _p_xpts_pm = round(_p_xpts_total / mp, 3) if mp > 0 else 0.0
+                    _p_apts_total = player_def_stats.get('player_apts', {}).get(player, 0)
+                    _p_apts_pm = round(_p_apts_total / mp, 3) if mp > 0 else 0.0
+                    _p_gf_total = player_def_stats.get('player_gf', {}).get(player, 0)
+                    _p_ga_total = player_def_stats.get('player_ga', {}).get(player, 0)
                     stats_rows[-1]['_xGA/Match'] = _p_xga_pm
                     stats_rows[-1]['_xTC/Match'] = _p_xtc_pm
                     stats_rows[-1]['_xPts/Match'] = _p_xpts_pm
+                    stats_rows[-1]['_aPts/Match'] = _p_apts_pm
+                    stats_rows[-1]['_GF/Match'] = round(_p_gf_total / mp, 2) if mp > 0 else 0.0
+                    stats_rows[-1]['_GA/Match'] = round(_p_ga_total / mp, 2) if mp > 0 else 0.0
                 stats_summary = pd.DataFrame(stats_rows).sort_values('xT/Match', ascending=False)
 
                 # --- Player Selector ---
@@ -2981,29 +3023,68 @@ for mgr_idx, manager in enumerate(managers):
 
                     st.divider()
 
-                    # --- Expected Points per Match ---
-                    st.subheader("🏆 Expected Points (xPts) per Match")
-                    st.caption("xPts simulates match outcomes from Man Utd xG vs opponent xG using a Poisson model (3 × P(win) + 1 × P(draw)).")
-                    _xpts_df = stats_summary[['Player', '_xPts/Match']].copy()
-                    _xpts_df = _xpts_df[_xpts_df['Player'] != 'Unknown'].sort_values('_xPts/Match', ascending=True)
-                    fig_xpts = px.bar(
-                        _xpts_df, x='_xPts/Match', y='Player', orientation='h',
-                        title='Average Expected Points in Matches Player Appeared In',
-                        template='plotly_dark',
-                        color='_xPts/Match',
-                        color_continuous_scale=['#ff4b4b', '#ffd700', '#00ff85'],
-                        labels={'_xPts/Match': 'xPts/Match'}
-                    )
-                    fig_xpts.add_vline(x=1.0, line_dash='dash', line_color='#aaaaaa',
-                                       annotation_text='1 pt (draw baseline)', annotation_font_color='#aaaaaa')
-                    fig_xpts.update_layout(paper_bgcolor='#0e1117', plot_bgcolor='#0e1117',
-                                           height=max(400, len(_xpts_df) * 28),
-                                           coloraxis_showscale=False)
-                    st.plotly_chart(fig_xpts, use_container_width=True)
+                    # --- xPts vs Actual Points comparison ---
+                    st.subheader("🏆 Expected vs Actual Points per Match")
+                    st.caption("xPts uses a Poisson model on xG data. Actual Pts = real W/D/L result. A player consistently below the line underperforms their underlying numbers — above the line means they punch above expectation.")
+                    _pts_df = stats_summary[['Player', '_xPts/Match', '_aPts/Match', '_GF/Match', '_GA/Match']].copy()
+                    _pts_df = _pts_df[_pts_df['Player'] != 'Unknown'].sort_values('_xPts/Match', ascending=True)
+
+                    _pc1, _pc2 = st.columns(2)
+                    with _pc1:
+                        _pts_melt = _pts_df[['Player', '_xPts/Match', '_aPts/Match']].melt(
+                            id_vars='Player', var_name='Type', value_name='Points'
+                        )
+                        _pts_melt['Type'] = _pts_melt['Type'].map({
+                            '_xPts/Match': 'xPts/Match', '_aPts/Match': 'Actual Pts/Match'
+                        })
+                        fig_pts_cmp = px.bar(
+                            _pts_melt, x='Points', y='Player', color='Type', orientation='h',
+                            barmode='group',
+                            title='xPts vs Actual Points per Match',
+                            template='plotly_dark',
+                            color_discrete_map={
+                                'xPts/Match': '#00a3ff',
+                                'Actual Pts/Match': '#ffd700',
+                            }
+                        )
+                        fig_pts_cmp.add_vline(x=1.0, line_dash='dash', line_color='#555',
+                                              annotation_text='1 pt', annotation_font_color='#aaa')
+                        fig_pts_cmp.update_layout(
+                            paper_bgcolor='#0e1117', plot_bgcolor='#0e1117',
+                            height=max(400, len(_pts_df) * 40),
+                            legend=dict(orientation='h', yanchor='bottom', y=1.01, xanchor='center', x=0.5)
+                        )
+                        st.plotly_chart(fig_pts_cmp, use_container_width=True)
+                    with _pc2:
+                        _ggoal_df = _pts_df[['Player', '_GF/Match', '_GA/Match']].melt(
+                            id_vars='Player', var_name='Type', value_name='Goals'
+                        )
+                        _ggoal_df['Type'] = _ggoal_df['Type'].map({
+                            '_GF/Match': 'Goals For/Match', '_GA/Match': 'Goals Against/Match'
+                        })
+                        _ggoal_sorted = _pts_df[['Player', '_GA/Match']].sort_values('_GA/Match', ascending=True)
+                        _player_order = _ggoal_sorted['Player'].tolist()
+                        fig_goals_cmp = px.bar(
+                            _ggoal_df, x='Goals', y='Player', color='Type', orientation='h',
+                            barmode='group',
+                            title='Goals For vs Goals Against per Match',
+                            template='plotly_dark',
+                            color_discrete_map={
+                                'Goals For/Match': '#00ff85',
+                                'Goals Against/Match': '#ff4b4b',
+                            },
+                            category_orders={'Player': _player_order}
+                        )
+                        fig_goals_cmp.update_layout(
+                            paper_bgcolor='#0e1117', plot_bgcolor='#0e1117',
+                            height=max(400, len(_pts_df) * 40),
+                            legend=dict(orientation='h', yanchor='bottom', y=1.01, xanchor='center', x=0.5)
+                        )
+                        st.plotly_chart(fig_goals_cmp, use_container_width=True)
 
                     st.divider()
                     st.subheader(f"📊 Average Player Statistics ({n_matches} Matches)")
-                    _display_summary = stats_summary.drop(columns=['_xGA/Match', '_xTC/Match', '_xPts/Match'], errors='ignore')
+                    _display_summary = stats_summary.drop(columns=['_xGA/Match', '_xTC/Match', '_xPts/Match', '_aPts/Match', '_GF/Match', '_GA/Match'], errors='ignore')
                     st.dataframe(_display_summary, use_container_width=True, hide_index=True)
             else:
                 st.error(f"Failed to load {mgr_short} match data.")
