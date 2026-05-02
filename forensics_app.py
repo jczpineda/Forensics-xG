@@ -3116,11 +3116,6 @@ for mgr_idx, manager in enumerate(managers):
                 mc5.metric("📏 Def. Line", f"{avg_def}m")
                 st.divider()
 
-                # --- Per-Match Table ---
-                st.subheader("📋 Per-Match Breakdown")
-                display_ts = ts_df.copy()
-                display_ts.index = range(1, len(display_ts) + 1)
-                st.dataframe(display_ts, use_container_width=True)
                 st.divider()
 
                 # --- Bar Charts Row ---
@@ -3309,5 +3304,13 @@ for mgr_idx, manager in enumerate(managers):
                     ax_xtcg.set_title(f'Average xT Conceded Grid — {n_matches_t} Matches', color='white', fontsize=12)
                     st.pyplot(fig_xtcg)
                     plt.close(fig_xtcg)
+
+                    st.divider()
+
+                # --- Per-Match Table ---
+                st.subheader("📋 Per-Match Breakdown")
+                display_ts = ts_df.copy()
+                display_ts.index = range(1, len(display_ts) + 1)
+                st.dataframe(display_ts, use_container_width=True)
             else:
                 st.error(f"Failed to load {mgr_short_t} match data.")
