@@ -334,7 +334,9 @@ CASE_DATABASE = {
             "vs Nottingham Forest (2)": "carrick.json/Nottingham Forest 2.JSON",
             "vs Brighton (2)": "carrick.json/Brighton 2.JSON"
         },
-        "stats_files": {}
+        "stats_files": {
+            "📊 UnderStat (Carrick)": "carrick.csv/Carrick United (Understat).xlsx",
+        }
     }
 }
 
