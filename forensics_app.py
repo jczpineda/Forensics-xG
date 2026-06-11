@@ -760,7 +760,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-c1, c2 = st.columns([1, 8])
+c1, c2 = st.columns([1, 18], gap="small", vertical_alignment="center")
 with c1:
     st.markdown("# 🧬")
 with c2:
@@ -926,7 +926,7 @@ def render_epl_dashboard(case):
         st.subheader("🗺️ League Style Map")
         st.caption("Each dot is a team, coloured by its playstyle archetype. "
                    "Dashed lines mark the league median — read the quadrants as style poles.")
-        cpa, cpb = st.columns([2, 3])
+        cpa, cpb = st.columns([2, 3], vertical_alignment="bottom")
         preset = cpa.selectbox("Preset comparison", list(_EPL_STYLE_PRESETS.keys()), key="epl_preset")
         x_col, y_col, x_inv, y_inv = _EPL_STYLE_PRESETS[preset]
         numeric_cols = [c for c in df.columns if c not in ("Squad", "Cluster", "Archetype", "Matches")]
