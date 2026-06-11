@@ -460,7 +460,7 @@ def _load_all_manager_data(manager_key):
         team_match_stats.append({
             'Match': match_label, 'Possession': possession, 'xG': match_xg,
             'xGA': round(match_xga, 2),
-            'Field Tilt': field_tilt, 'PPDA': ppda, 'Def Line': avg_def_line
+            'Field Tilt': field_tilt, 'PPDA': ppda, 'Recovery Height': avg_def_line
         })
 
         # Actual goals: Type 16 = goal; Own Goals (Outcome == 'Own Goal') count for opponent
@@ -1246,7 +1246,7 @@ for mgr_idx, manager in enumerate(managers):
                         m7.metric("⚠️ Discipline", f"{fouls} Fouls", "Committed")
                         m8.metric("⚖️ Field Tilt", f"{field_tilt}%", "Final 3rd Share")
                         m9.metric("🛑 PPDA", f"{ppda}", "Passes per Def. Action")
-                        m10.metric("📏 Def. Line", f"{avg_rec_height}m", "Avg Recovery Height")
+                        m10.metric("📏 Avg Recovery Height", f"{avg_rec_height}m", "Tackles, Int. & Clearances")
                         st.divider()
 
                         # --- Team progression insights ---
@@ -3446,7 +3446,7 @@ for mgr_idx, manager in enumerate(managers):
                 avg_xga = round(ts_df['xGA'].mean(), 2)
                 avg_tilt = round(ts_df['Field Tilt'].mean(), 1)
                 avg_ppda = round(ts_df['PPDA'].mean(), 1)
-                avg_def = round(ts_df['Def Line'].mean(), 1)
+                avg_def = round(ts_df['Recovery Height'].mean(), 1)
 
                 st.subheader(f"📊 Averages Across {n_matches_t} Matches")
                 mc1, mc2, mc3, mc4, mc5, mc6 = st.columns(6)
@@ -3455,7 +3455,10 @@ for mgr_idx, manager in enumerate(managers):
                 mc3.metric("🚨 xGA", f"{avg_xga}")
                 mc4.metric("⚖️ Field Tilt", f"{avg_tilt}%")
                 mc5.metric("🛑 PPDA", f"{avg_ppda}")
-                mc6.metric("📏 Def. Line", f"{avg_def}m")
+                mc6.metric("📏 Avg Recovery Height", f"{avg_def}m",
+                           help="Mean pitch height (x, 0–100) of the team's ball recoveries — "
+                                "successful tackles, interceptions and clearances. Because clearances "
+                                "are deep actions, this sits lower than where the team presses (PPDA).")
                 st.divider()
 
                 st.divider()
@@ -3544,7 +3547,7 @@ for mgr_idx, manager in enumerate(managers):
                         if avg_def > 0:
                             pitch_dh.lines(avg_def, 0, avg_def, 100, color='#ffd700', lw=3,
                                            linestyle='dashed', alpha=0.9, ax=ax_dh,
-                                           label=f'Avg Def Line ({avg_def}m)')
+                                           label=f'Avg Recovery Height ({avg_def}m)')
                             ax_dh.add_patch(mpatches.Rectangle((0, 0), avg_def, 100, alpha=0.1, color='#ffd700', ec=None))
                             ax_dh.legend(facecolor='#262730', labelcolor='white')
                         ax_dh.set_title(f'Defensive Actions — {n_matches_t} Matches', color='white', fontsize=12)
