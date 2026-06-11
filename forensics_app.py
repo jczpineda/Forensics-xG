@@ -765,6 +765,17 @@ tabs = st.tabs(managers)
 
 for mgr_idx, manager in enumerate(managers):
     with tabs[mgr_idx]:
+        # Single-match caveat — averages/trends reflect just one game and are not
+        # comparable to multi-match suspects.
+        _n_matches = len(CASE_DATABASE[manager]["json_files"])
+        if _n_matches <= 1:
+            st.warning(
+                f"⚠️ **Single-match sample ({_n_matches} game).** "
+                f"All per-match averages, heatmaps and trends below reflect this one fixture only — "
+                f"treat them as a single data point, not a reliable average, and avoid head-to-head "
+                f"comparison against multi-match suspects."
+            )
+
         sub_t1, sub_t2, sub_t3, sub_t4 = st.tabs(["📊 STATISTICAL REPORTS", "⚽ MATCH TELEMETRY", "👥 AVERAGE PLAYER STATS", "📈 AVERAGE TEAM STATS"])
 
         # === TAB A: STATS ===
