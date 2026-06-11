@@ -249,7 +249,15 @@ def load_match_data(path_or_url):
 
 
 # --- 4. DATA INDEX ---
+# "EPL 25/26" is a special league-wide playstyle case handled by render_epl_dashboard();
+# it carries no per-match json so the standard 4-sub-tab flow is bypassed for it.
 CASE_DATABASE = {
+    "EPL 25/26": {
+        "epl_styles": "epl.csv/epl_team_styles.csv",
+        "epl_matches": "epl.csv/epl_team_matches.csv",
+        "json_files": {},
+        "stats_files": {},
+    },
     "RUBEN AMORIM": {
         "json_files": {
             "vs Arsenal": "amorim.json/Arsenal.JSON",
@@ -347,7 +355,7 @@ def _load_all_manager_data(manager_key):
             utd_parts.append(utd)
             full_dfs[label] = df
     if not utd_parts:
-        return pd.DataFrame(), {}, {}, []
+        return pd.DataFrame(), {}, {}, [], {}
     combined = pd.concat(utd_parts, ignore_index=True)
 
     # Compute set-piece goals & assists inside the cached function
@@ -758,6 +766,312 @@ with c2:
     st.markdown('<div class="tagline">Where the Beautiful Game Meets Hard Evidence</div>', unsafe_allow_html=True)
 st.divider()
 
+# =====================================================================
+# ============  EPL 25/26 LEAGUE-WIDE PLAYSTYLE DASHBOARD  =============
+# =====================================================================
+
+# Features used to cluster teams into playstyle archetypes (z-scored).
+_EPL_CLUSTER_FEATURES = [
+    "Possession %", "PPDA", "Long Pass %", "Avg Pass Length", "Pass Acc %",
+    "Match Tempo", "Counter Share %", "Rec. High %", "Avg Shot Dist", "xG",
+]
+
+# Radar profile axes: (column, invert?, friendly label). invert=True means a
+# lower raw value is "more" of the trait (e.g. low PPDA = more pressing).
+_EPL_RADAR_AXES = [
+    ("Possession %", False, "Possession"),
+    ("Passes/Possession", False, "Build-up Patience"),
+    ("Long Pass %", False, "Directness"),
+    ("PPDA", True, "Press Intensity"),
+    ("Rec. High %", False, "High Recoveries"),
+    ("Match Tempo", False, "Tempo"),
+    ("Counter Share %", False, "Counter Threat"),
+    ("xG", False, "Attack Output"),
+    ("Crosses", False, "Crossing"),
+    ("Aerial Won %", False, "Aerial Strength"),
+]
+
+# Curated axis presets for the style map (x_col, y_col, x_invert, y_invert).
+_EPL_STYLE_PRESETS = {
+    "Press vs Possession": ("Possession %", "PPDA", False, True),
+    "Directness vs Tempo": ("Long Pass %", "Match Tempo", False, False),
+    "Attack vs Defence": ("xG", "Shots Against", False, True),
+    "Build-up: Short ↔ Long": ("Avg Pass Length", "Passes/Possession", False, False),
+    "Counter-attack vs Possession": ("Counter Share %", "Possession %", False, False),
+    "High Line vs Pressing": ("Rec. High %", "PPDA", False, True),
+}
+
+
+@st.cache_data(show_spinner=False)
+def _epl_load_and_cluster(styles_path):
+    """Load the season style table and assign each team a playstyle archetype.
+
+    Returns (styles_df_with_archetype, cluster_info, centroid_z_df, err).
+    """
+    df, err = load_stats_data(styles_path)
+    if df is None:
+        return None, None, None, err
+    df = df.copy()
+    for c in df.columns:
+        if c != "Squad":
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    feats = [f for f in _EPL_CLUSTER_FEATURES if f in df.columns]
+    X = df[feats].fillna(df[feats].mean())
+    mu, sigma = X.mean(), X.std(ddof=0).replace(0, 1.0)
+    Z = (X - mu) / sigma
+
+    from scipy.cluster.vq import kmeans2
+    k = 5
+    centroids, labels = kmeans2(Z.values, k, iter=50, minit="++", seed=42, missing="warn")
+    df["Cluster"] = labels
+
+    # z-scored centroids for interpretation/heatmap
+    centroid_z = pd.DataFrame(centroids, columns=feats)
+
+    def trait(row, col):
+        return row[feats.index(col)] if col in feats else 0.0
+
+    def name_cluster(cz):
+        poss = trait(cz, "Possession %")
+        press = -trait(cz, "PPDA")           # high = aggressive press
+        direct = trait(cz, "Long Pass %")
+        counter = trait(cz, "Counter Share %")
+        tempo = trait(cz, "Match Tempo")
+        attack = trait(cz, "xG")
+        if poss >= 0.45 and counter >= 0.3 and tempo >= 0.2:
+            return "Vertical / Transitional Possession"
+        if poss >= 0.6 and press >= 0.1:
+            return "Possession-Dominant High Press"
+        if poss >= 0.45:
+            return "Patient Possession Control"
+        if poss <= -0.4 and attack <= -0.2:
+            return "Direct Low Block"
+        if direct >= 0.4:
+            return "Direct & Physical"
+        if press >= 0.45:
+            return "Aggressive Pressing"
+        if counter >= 0.6:
+            return "Transition Counter-Attack"
+        if tempo >= 0.4:
+            return "High-Tempo Vertical"
+        return "Mid-Block Balanced"
+
+    cluster_info = []
+    used = {}
+    for ci in sorted(set(labels)):
+        cz = centroids[ci]
+        teams = df.loc[df["Cluster"] == ci, "Squad"].tolist()
+        if not teams:
+            continue
+        title = name_cluster(cz)
+        if title in used:  # guarantee unique titles
+            title = f"{title} (II)" if used[title] == 1 else f"{title} ({used[title] + 1})"
+            used[name_cluster(cz)] += 1
+        else:
+            used[title] = 1
+        # standout traits: the two largest |z| features
+        order = sorted(feats, key=lambda f: -abs(cz[feats.index(f)]))
+        traits = []
+        for f in order[:3]:
+            zval = cz[feats.index(f)]
+            arrow = "▲" if zval > 0 else "▼"
+            traits.append(f"{arrow} {f}")
+        cluster_info.append({
+            "cluster": int(ci),
+            "title": title,
+            "teams": teams,
+            "traits": traits,
+        })
+
+    # map title back onto each team
+    title_by_cluster = {c["cluster"]: c["title"] for c in cluster_info}
+    df["Archetype"] = df["Cluster"].map(title_by_cluster)
+    centroid_z.index = [title_by_cluster.get(i, f"Cluster {i}") for i in range(len(centroid_z))]
+    return df, cluster_info, centroid_z, None
+
+
+def _epl_pct(series, invert=False):
+    """Percentile rank (0-100) of a series; invert for 'lower is more' metrics."""
+    s = -series if invert else series
+    return s.rank(pct=True) * 100.0
+
+
+def render_epl_dashboard(case):
+    st.markdown(
+        "## 🏴󠁧󠁢󠁥󠁮󠁧󠁿 English Premier League — 2025/26 Playstyle Forensics\n"
+        "Season-long Wyscout team data for all 20 clubs, distilled into the metrics "
+        "that define **how each side actually plays** — possession, pressing, directness, "
+        "tempo and transition. Every figure is a **per-match season average**."
+    )
+
+    df, cluster_info, centroid_z, err = _epl_load_and_cluster(case["epl_styles"])
+    if df is None:
+        st.error(f"Could not load EPL data: {err}")
+        st.caption(f"Expected file at: {case['epl_styles']}")
+        return
+
+    league = df.set_index("Squad")
+    teams = sorted(df["Squad"].tolist())
+    arch_palette = px.colors.qualitative.Bold
+
+    e1, e2, e3, e4 = st.tabs(
+        ["🗺️ STYLE MAP", "🎯 TEAM PROFILE", "📋 LEAGUE TABLE", "🧬 ARCHETYPES"]
+    )
+
+    # ---------------- STYLE MAP ----------------
+    with e1:
+        st.subheader("🗺️ League Style Map")
+        st.caption("Each dot is a team, coloured by its playstyle archetype. "
+                   "Dashed lines mark the league median — read the quadrants as style poles.")
+        cpa, cpb = st.columns([2, 3])
+        preset = cpa.selectbox("Preset comparison", list(_EPL_STYLE_PRESETS.keys()), key="epl_preset")
+        x_col, y_col, x_inv, y_inv = _EPL_STYLE_PRESETS[preset]
+        numeric_cols = [c for c in df.columns if c not in ("Squad", "Cluster", "Archetype", "Matches")]
+        with cpb.expander("⚙️ Or pick custom axes"):
+            cc1, cc2 = st.columns(2)
+            cx = cc1.selectbox("X axis", numeric_cols, index=numeric_cols.index(x_col), key="epl_cx")
+            cy = cc2.selectbox("Y axis", numeric_cols, index=numeric_cols.index(y_col), key="epl_cy")
+            if cc1.checkbox("Use custom axes", key="epl_custom_axes"):
+                x_col, y_col, x_inv, y_inv = cx, cy, False, False
+
+        plot_df = df.copy()
+        fig = px.scatter(
+            plot_df, x=x_col, y=y_col, color="Archetype", text="Squad",
+            color_discrete_sequence=arch_palette, height=640,
+            hover_data={"Squad": False, x_col: ":.2f", y_col: ":.2f"},
+        )
+        fig.update_traces(textposition="top center", textfont=dict(size=10),
+                          marker=dict(size=14, line=dict(width=1, color="white")))
+        fig.add_vline(x=plot_df[x_col].median(), line_dash="dash", line_color="gray", opacity=0.5)
+        fig.add_hline(y=plot_df[y_col].median(), line_dash="dash", line_color="gray", opacity=0.5)
+        if x_inv:
+            fig.update_xaxes(autorange="reversed")
+        if y_inv:
+            fig.update_yaxes(autorange="reversed")
+        x_lbl = f"{x_col}  (→ less)" if x_inv else x_col
+        y_lbl = f"{y_col}  (↑ less)" if y_inv else y_col
+        fig.update_layout(template="plotly_dark", paper_bgcolor="#0e1117",
+                          plot_bgcolor="#0e1117", xaxis_title=x_lbl, yaxis_title=y_lbl,
+                          legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ---------------- TEAM PROFILE ----------------
+    with e2:
+        st.subheader("🎯 Team Style Profile")
+        ct1, ct2 = st.columns(2)
+        team = ct1.selectbox("Team", teams, index=teams.index("Arsenal") if "Arsenal" in teams else 0, key="epl_team")
+        compare = ct2.selectbox("Compare with (optional)", ["— none —"] + [t for t in teams if t != team], key="epl_cmp")
+
+        axes = [a for a in _EPL_RADAR_AXES if a[0] in df.columns]
+        labels = [a[2] for a in axes]
+        pcts = {a[0]: _epl_pct(df.set_index("Squad")[a[0]], a[1]) for a in axes}
+
+        def radar_vals(tm):
+            return [float(pcts[a[0]].loc[tm]) for a in axes]
+
+        radar = go.Figure()
+        radar.add_trace(go.Scatterpolar(
+            r=radar_vals(team) + [radar_vals(team)[0]], theta=labels + [labels[0]],
+            fill="toself", name=team, line=dict(color="#00ff85", width=2),
+            fillcolor="rgba(0,255,133,0.25)"))
+        if compare != "— none —":
+            radar.add_trace(go.Scatterpolar(
+                r=radar_vals(compare) + [radar_vals(compare)[0]], theta=labels + [labels[0]],
+                fill="toself", name=compare, line=dict(color="#ff4b4b", width=2),
+                fillcolor="rgba(255,75,75,0.20)"))
+        radar.update_layout(
+            template="plotly_dark", paper_bgcolor="#0e1117", height=520,
+            polar=dict(bgcolor="#0e1117", radialaxis=dict(range=[0, 100], showticklabels=True, ticks="")),
+            legend=dict(orientation="h", yanchor="bottom", y=1.05, x=0),
+            title="Percentile rank vs league (100 = league-leading)")
+
+        cprof1, cprof2 = st.columns([3, 2])
+        cprof1.plotly_chart(radar, use_container_width=True)
+        with cprof2:
+            row = league.loc[team]
+            st.markdown(f"### {team}")
+            st.markdown(f"**Archetype:** {row['Archetype']}")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Possession", f"{row['Possession %']:.1f}%")
+            m2.metric("PPDA", f"{row['PPDA']:.2f}")
+            m3.metric("xG / match", f"{row['xG']:.2f}")
+            m4, m5, m6 = st.columns(3)
+            m4.metric("Long Pass %", f"{row['Long Pass %']:.1f}%")
+            m5.metric("Goals / match", f"{row['Goals']:.2f}")
+            m6.metric("Conceded", f"{row['Conceded']:.2f}")
+            st.caption(_epl_style_summary(team, pcts, axes, row))
+
+    # ---------------- LEAGUE TABLE ----------------
+    with e3:
+        st.subheader("📋 Season Style Table")
+        st.caption("Per-match season averages for every club. Click any column header to sort.")
+        show = df.drop(columns=["Cluster"]).set_index("Squad")
+        cols = ["Archetype"] + [c for c in show.columns if c != "Archetype"]
+        st.dataframe(show[cols], use_container_width=True, height=740)
+
+        st.divider()
+        st.markdown("##### 📊 Rank the league by one metric")
+        metric_cols = [c for c in df.columns if c not in ("Squad", "Cluster", "Archetype", "Matches")]
+        mc = st.selectbox("Metric", metric_cols, index=metric_cols.index("Possession %"), key="epl_rankmetric")
+        asc = st.checkbox("Ascending (lowest first)", value=False, key="epl_rankasc")
+        bar_df = df[["Squad", mc, "Archetype"]].sort_values(mc, ascending=asc)
+        figb = px.bar(bar_df, x=mc, y="Squad", color="Archetype", orientation="h",
+                      color_discrete_sequence=arch_palette, height=620)
+        figb.update_layout(template="plotly_dark", paper_bgcolor="#0e1117",
+                           plot_bgcolor="#0e1117", yaxis=dict(autorange="reversed"),
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
+        st.plotly_chart(figb, use_container_width=True)
+
+    # ---------------- ARCHETYPES ----------------
+    with e4:
+        st.subheader("🧬 Playstyle Archetypes")
+        st.caption("Teams grouped by k-means clustering on 10 standardised style metrics. "
+                   "Each archetype's defining traits (▲ above / ▼ below league average) are shown.")
+        cols = st.columns(len(cluster_info)) if cluster_info else [st]
+        for col, info in zip(cols, cluster_info):
+            with col:
+                st.markdown(f"#### {info['title']}")
+                st.caption(" · ".join(info["traits"]))
+                for tm in info["teams"]:
+                    st.markdown(f"- {tm}")
+
+        st.divider()
+        st.markdown("##### Archetype fingerprints (standardised centroids)")
+        st.caption("Red = above league average for that metric, blue = below. Reads as the 'DNA' of each style group.")
+        heat = go.Figure(data=go.Heatmap(
+            z=centroid_z.values, x=list(centroid_z.columns), y=list(centroid_z.index),
+            colorscale="RdBu_r", zmid=0, colorbar=dict(title="z"),
+            hovertemplate="%{y}<br>%{x}: %{z:.2f}σ<extra></extra>"))
+        heat.update_layout(template="plotly_dark", paper_bgcolor="#0e1117",
+                           plot_bgcolor="#0e1117", height=360,
+                           margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(heat, use_container_width=True)
+
+
+def _epl_style_summary(team, pcts, axes, row):
+    """Build a one-line natural-language style descriptor from percentiles."""
+    p = {a[2]: float(pcts[a[0]].loc[team]) for a in axes}
+    bits = []
+    if p.get("Possession", 50) >= 65:
+        bits.append("possession-heavy")
+    elif p.get("Possession", 50) <= 35:
+        bits.append("low-possession")
+    if p.get("Press Intensity", 50) >= 65:
+        bits.append("high-pressing")
+    elif p.get("Press Intensity", 50) <= 35:
+        bits.append("sits in a block")
+    if p.get("Directness", 50) >= 65:
+        bits.append("direct")
+    if p.get("Counter Threat", 50) >= 70:
+        bits.append("counter-attacking")
+    if p.get("Attack Output", 50) >= 70:
+        bits.append("high attacking output")
+    if not bits:
+        bits.append("balanced across the board")
+    return "Profile: " + ", ".join(bits) + "."
+
+
 st.subheader("SELECT SUSPECT")
 
 managers = list(CASE_DATABASE.keys())
@@ -765,6 +1079,11 @@ tabs = st.tabs(managers)
 
 for mgr_idx, manager in enumerate(managers):
     with tabs[mgr_idx]:
+        # League-wide playstyle case — bypasses the standard per-suspect flow.
+        if manager == "EPL 25/26":
+            render_epl_dashboard(CASE_DATABASE[manager])
+            continue
+
         # Single-match caveat — averages/trends reflect just one game and are not
         # comparable to multi-match suspects.
         _n_matches = len(CASE_DATABASE[manager]["json_files"])
