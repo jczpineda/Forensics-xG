@@ -451,6 +451,13 @@ def _load_all_manager_data(manager_key):
             (utd_events['Type'].isin([8, 12]))
         ]
         avg_def_line = round(recoveries['x'].mean(), 1) if not recoveries.empty else 0
+        # Engagement height: active ball-wins only (successful tackles + interceptions),
+        # excluding clearances. Reflects where the team actually engages — tracks PPDA.
+        engagements = utd_events[
+            ((utd_events['Type'] == 7) & (utd_events['Outcome'] == 'Successful')) |
+            (utd_events['Type'] == 8)
+        ]
+        avg_engage_line = round(engagements['x'].mean(), 1) if not engagements.empty else 0
 
         # Per-player xGA (opponent xG in this match)
         opp_shots = opp_events[opp_events['Type'].isin([13, 14, 15, 16])]
@@ -460,7 +467,8 @@ def _load_all_manager_data(manager_key):
         team_match_stats.append({
             'Match': match_label, 'Possession': possession, 'xG': match_xg,
             'xGA': round(match_xga, 2),
-            'Field Tilt': field_tilt, 'PPDA': ppda, 'Recovery Height': avg_def_line
+            'Field Tilt': field_tilt, 'PPDA': ppda, 'Recovery Height': avg_def_line,
+            'Engagement Height': avg_engage_line
         })
 
         # Actual goals: Type 16 = goal; Own Goals (Outcome == 'Own Goal') count for opponent
@@ -3447,9 +3455,10 @@ for mgr_idx, manager in enumerate(managers):
                 avg_tilt = round(ts_df['Field Tilt'].mean(), 1)
                 avg_ppda = round(ts_df['PPDA'].mean(), 1)
                 avg_def = round(ts_df['Recovery Height'].mean(), 1)
+                avg_engage = round(ts_df['Engagement Height'].mean(), 1)
 
                 st.subheader(f"📊 Averages Across {n_matches_t} Matches")
-                mc1, mc2, mc3, mc4, mc5, mc6 = st.columns(6)
+                mc1, mc2, mc3, mc4, mc5, mc6, mc7 = st.columns(7)
                 mc1.metric("📊 Possession", f"{avg_poss}%")
                 mc2.metric("📈 xG", f"{avg_xg}")
                 mc3.metric("🚨 xGA", f"{avg_xga}")
@@ -3459,6 +3468,10 @@ for mgr_idx, manager in enumerate(managers):
                            help="Mean pitch height (x, 0–100) of the team's ball recoveries — "
                                 "successful tackles, interceptions and clearances. Because clearances "
                                 "are deep actions, this sits lower than where the team presses (PPDA).")
+                mc7.metric("🎯 Avg Engagement Height", f"{avg_engage}m",
+                           help="Mean pitch height (x, 0–100) of active ball-wins — successful "
+                                "tackles and interceptions only (no clearances). Reflects where the "
+                                "team actually engages, and tracks PPDA more closely than Recovery Height.")
                 st.divider()
 
                 st.divider()
@@ -3549,7 +3562,12 @@ for mgr_idx, manager in enumerate(managers):
                                            linestyle='dashed', alpha=0.9, ax=ax_dh,
                                            label=f'Avg Recovery Height ({avg_def}m)')
                             ax_dh.add_patch(mpatches.Rectangle((0, 0), avg_def, 100, alpha=0.1, color='#ffd700', ec=None))
-                            ax_dh.legend(facecolor='#262730', labelcolor='white')
+                        if avg_engage > 0:
+                            pitch_dh.lines(avg_engage, 0, avg_engage, 100, color='#00e0ff', lw=3,
+                                           linestyle='dashed', alpha=0.9, ax=ax_dh,
+                                           label=f'Avg Engagement Height ({avg_engage}m)')
+                        if avg_def > 0 or avg_engage > 0:
+                            ax_dh.legend(facecolor='#262730', labelcolor='white', loc='upper right')
                         ax_dh.set_title(f'Defensive Actions — {n_matches_t} Matches', color='white', fontsize=12)
                         st.pyplot(fig_dh)
                         plt.close(fig_dh)
