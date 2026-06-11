@@ -1234,6 +1234,13 @@ for mgr_idx, manager in enumerate(managers):
                             (plot_df['Type'].isin([8, 12]))
                         ]
                         avg_rec_height = round(recoveries['x'].mean(), 1) if not recoveries.empty else 0
+                        # Engagement height: active ball-wins only (successful tackles +
+                        # interceptions, no clearances) — where the team actively engages.
+                        engagements = plot_df[
+                            ((plot_df['Type'] == 7) & (plot_df['Outcome'] == 'Successful')) |
+                            (plot_df['Type'] == 8)
+                        ]
+                        avg_engage_height = round(engagements['x'].mean(), 1) if not engagements.empty else 0
 
                         # Possession %
                         opp_total_passes = len(opp_stats[opp_stats['Type'] == 1])
@@ -1839,17 +1846,22 @@ for mgr_idx, manager in enumerate(managers):
                             st.subheader("🔴 Defensive Shield")
                             def_heat = viz_df[viz_df['Type'].isin([4, 7, 8, 12])]
                             if not def_heat.empty:
-                                _mc1, _mc2, _mc3 = st.columns(3)
+                                _mc1, _mc2, _mc3, _mc4 = st.columns(4)
                                 _mc1.metric("Total Defensive Actions", len(def_heat))
                                 _mc2.metric("Players", def_heat['Player'].nunique())
-                                _mc3.metric("🟡 Avg Recovery Height", f"{avg_rec_height} u", help="Dashed yellow line on the map")
-                                fig_ds = _make_plotly_pitch("Defensive Density — brighter = more actions · 🟡 line = avg recovery height")
+                                _mc3.metric("🟡 Avg Recovery Height", f"{avg_rec_height} u",
+                                            help="Dashed yellow line — all recoveries (tackles, interceptions & clearances).")
+                                _mc4.metric("🔵 Avg Engagement Height", f"{avg_engage_height} u",
+                                            help="Dashed cyan line — active ball-wins only (tackles & interceptions, no "
+                                                 "clearances). Sits higher than recovery height; tracks the press.")
+                                fig_ds = _make_plotly_pitch("Defensive Density — brighter = more actions · 🟡 recovery height · 🔵 engagement height")
                                 fig_ds.add_trace(go.Histogram2d(
                                     x=def_heat['x'], y=def_heat['y'], nbinsx=20, nbinsy=14,
                                     colorscale='Reds', opacity=0.7, showscale=True,
                                     colorbar=dict(title='Def Actions')
                                 ))
                                 fig_ds.add_vline(x=avg_rec_height, line_dash='dash', line_color='#ffd700', line_width=3)
+                                fig_ds.add_vline(x=avg_engage_height, line_dash='dash', line_color='#00e0ff', line_width=3)
                                 st.plotly_chart(fig_ds, use_container_width=True)
                                 def_shield_leaders = def_heat.groupby('Player').size().reset_index(name='Def Actions').sort_values('Def Actions', ascending=False)
                                 if not def_shield_leaders.empty:
