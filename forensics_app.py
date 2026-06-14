@@ -1133,10 +1133,12 @@ for mgr_idx, manager in enumerate(managers):
                         num_cols = display_df.select_dtypes(include=np.number).columns.tolist()
 
                         if all_cols:
-                            c1, c2, c3 = st.columns(3)
+                            c1, c2 = st.columns(2)
                             x_col = c1.selectbox("X Axis", all_cols, index=0, key=f"sx_{manager}")
                             y_col = c2.selectbox("Y Axis", num_cols if num_cols else all_cols, index=min(1, len(num_cols) - 1) if len(num_cols) > 1 else 0, key=f"sy_{manager}")
-                            lbl_col = c3.selectbox("Label", all_cols, index=0, key=f"sl_{manager}")
+                            # Point labels are fixed to the squad/team identifier — no user option.
+                            _lbl_pref = [c for c in all_cols if c.strip().lower() in ('squad', 'team', 'player', 'name')]
+                            lbl_col = _lbl_pref[0] if _lbl_pref else all_cols[0]
 
                             if y_col in num_cols:
                                 fig = px.scatter(display_df, x=x_col, y=y_col, text=lbl_col, template="plotly_dark")
