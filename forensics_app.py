@@ -114,6 +114,10 @@ def _qualifier_ids(qualifiers):
     return ids
 
 
+# Standard penalty conversion rate (historical PL ~0.76–0.79).
+_PENALTY_XG = 0.79
+
+
 def _calc_xg(x, y, is_header=False):
     """Estimate xG for a shot using a distance-and-angle logistic model.
 
@@ -212,6 +216,8 @@ def load_match_data(path_or_url):
                         "isThrowIn": 107 in qids,
                         "isFastBreak": bool(qids & {23, 24}),
                         "isBlocked": 82 in qids,
+                        "isHeader": 15 in qids,    # qualifier 15 = Head
+                        "isPenalty": 9 in qids,    # qualifier 9 = Penalty
                         "isHome": (team_name == home_name)
                     })
                 except (KeyError, ValueError, TypeError):
@@ -234,14 +240,17 @@ def load_match_data(path_or_url):
                 0
             )
 
-            # Compute xG for shots (Types 13=Miss, 14=Post, 15=SavedShot, 16=Goal)
+            # Compute xG for shots (Types 13=Miss, 14=Post, 15=SavedShot, 16=Goal).
+            # Penalties get a fixed conversion; headers use the lower header model.
             is_shot = df_events['Type'].isin([13, 14, 15, 16])
             df_events['xG'] = 0.0
             shot_mask = is_shot & (df_events['Outcome'] != 'Own Goal')
             if shot_mask.any():
-                df_events.loc[shot_mask, 'xG'] = df_events.loc[shot_mask].apply(
-                    lambda r: _calc_xg(r['x'], r['y']), axis=1
-                )
+                def _shot_xg(r):
+                    if r['isPenalty']:
+                        return _PENALTY_XG
+                    return _calc_xg(r['x'], r['y'], is_header=bool(r['isHeader']))
+                df_events.loc[shot_mask, 'xG'] = df_events.loc[shot_mask].apply(_shot_xg, axis=1)
 
         return df_events, None
     except Exception as e:
